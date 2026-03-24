@@ -7,3 +7,6 @@
 .swiftpm
 .vscode/
 xcuserdata/
+
+data/
+service-config.json
