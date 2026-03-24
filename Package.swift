@@ -56,6 +56,12 @@ let package = Package(
                 .product(name: "UnixSignals", package: "swift-service-lifecycle"),
             ],
             swiftSettings: swiftSettings),
+        .executableTarget(
+            name: "PrefilterClient",
+            dependencies: [
+                .product(name: "ArgumentParser", package: "swift-argument-parser"),
+            ],
+            swiftSettings: swiftSettings),
         .testTarget(
             name: "PIRServiceTests",
             dependencies: [

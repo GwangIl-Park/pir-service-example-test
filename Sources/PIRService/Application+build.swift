@@ -51,6 +51,7 @@ func loadUsecase(usecase: ServerConfiguration.Usecase) throws -> Usecase {
 func buildApplication(
     configuration: ApplicationConfiguration = .init(),
     usecaseStore: UsecaseStore = UsecaseStore(),
+    prefilterStore: PrefilterStore = PrefilterStore(),
     privacyPassState: PrivacyPassState<UserAuthenticator>? = nil,
     evaluationKeyStore: some PersistDriver = MemoryPersistDriver()) async throws -> some ApplicationProtocol
 {
@@ -72,6 +73,8 @@ func buildApplication(
 
     let processDatabaseController = PIRProcessDatabaseController()
     processDatabaseController.addRoutes(to: router.group())
+    let prefilterController = PrefilterController(store: prefilterStore)
+    prefilterController.addRoutes(to: router.group())
 
     var application = Application(router: router, configuration: configuration)
     application.addServices(evaluationKeyStore)

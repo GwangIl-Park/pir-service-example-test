@@ -50,6 +50,8 @@ struct ServerConfiguration: Codable {
         let fileStem: String
         let shardCount: Int
         let versionCount: Int?
+        let prefilterInputFile: String?
+        let prefilterOutputFile: String?
         let symmetricPirArguments: SymmetricPirArguments?
     }
 
@@ -66,17 +68,20 @@ struct ServerConfiguration: Codable {
 actor ReloadService: Service {
     let configFile: URL
     let usecaseStore: UsecaseStore
+    let prefilterStore: PrefilterStore
     let privacyPassState: PrivacyPassState<UserAuthenticator>
     let logger: Logger
 
     init(
         configFile: URL,
         usecaseStore: UsecaseStore,
+        prefilterStore: PrefilterStore,
         privacyPassState: PrivacyPassState<UserAuthenticator>,
         logger: Logger)
     {
         self.configFile = configFile
         self.usecaseStore = usecaseStore
+        self.prefilterStore = prefilterStore
         self.privacyPassState = privacyPassState
         self.logger = logger
     }
@@ -120,16 +125,78 @@ actor ReloadService: Service {
         }
         await privacyPassState.userAuthenticator.update(allowList: allowedUsers)
 
+        var latestPrefilterSnapshot: PrefilterStore.Snapshot?
         for usecase in config.usecases {
             // default to two versions
             let versionCount = usecase.versionCount ?? 2
             if versionCount == 0 {
                 // special case, remove all versions
                 try await usecaseStore.set(name: usecase.name, usecase: nil, versionCount: versionCount)
-                return
+                continue
             }
             let loaded = try loadUsecase(usecase: usecase)
             try await usecaseStore.set(name: usecase.name, usecase: loaded, versionCount: versionCount)
+
+            if latestPrefilterSnapshot == nil {
+                let sourceFile = usecase.prefilterInputFile ?? "data/input.txtpb"
+                let outputFile = usecase.prefilterOutputFile ?? "data/prefilter.json"
+                let urls = try loadPrefilterURLs(from: sourceFile)
+                if !urls.isEmpty {
+                    let filter = try BloomFilter(items: urls)
+                    try savePrefilter(filter: filter, to: outputFile)
+                    latestPrefilterSnapshot = .init(
+                        filter: filter,
+                        generatedAt: Date(),
+                        sourceURLCount: urls.count,
+                        sourceFile: sourceFile,
+                        outputFile: outputFile)
+                    logger.info("""
+                        Generated URL prefilters with \(urls.count) URLs from \(sourceFile), \
+                        saved Bloom to \(outputFile)
+                        """)
+                } else {
+                    logger.warning("Skipped Bloom filter generation because no URLs were found in \(sourceFile)")
+                }
+            }
         }
+
+        await prefilterStore.set(latestPrefilterSnapshot)
+    }
+
+    private func loadPrefilterURLs(from filePath: String) throws -> [String] {
+        // textproto 파일에서 `keyword: "..."` 라인만 추출하여 URL로 사용한다.
+        let url = URL(fileURLWithPath: filePath)
+        let content = try String(contentsOf: url, encoding: .utf8)
+
+        var urls: [String] = []
+        for rawLine in content.split(whereSeparator: \.isNewline) {
+            let line = rawLine.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard line.hasPrefix("keyword:") else { continue }
+
+            // keyword: "example.com" 형태에서 따옴표 안의 값만 추출
+            guard let firstQuoteIndex = line.firstIndex(of: "\""),
+                  let lastQuoteIndex = line.lastIndex(of: "\""),
+                  firstQuoteIndex < lastQuoteIndex
+            else {
+                continue
+            }
+
+            let valueStart = line.index(after: firstQuoteIndex)
+            let value = String(line[valueStart..<lastQuoteIndex])
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            if !value.isEmpty {
+                urls.append(value)
+            }
+        }
+
+        return urls
+    }
+
+    private func savePrefilter(filter: BloomFilter, to filePath: String) throws {
+        let outputURL = URL(fileURLWithPath: filePath)
+        let directoryURL = outputURL.deletingLastPathComponent()
+        try FileManager.default.createDirectory(at: directoryURL, withIntermediateDirectories: true)
+        let data = try JSONEncoder().encode(filter)
+        try data.write(to: outputURL, options: .atomic)
     }
 }
