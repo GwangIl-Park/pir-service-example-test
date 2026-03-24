@@ -70,6 +70,9 @@ func buildApplication(
 
     pirServiceController.addRoutes(to: pirGroup)
 
+    let processDatabaseController = PIRProcessDatabaseController()
+    processDatabaseController.addRoutes(to: router.group())
+
     var application = Application(router: router, configuration: configuration)
     application.addServices(evaluationKeyStore)
 

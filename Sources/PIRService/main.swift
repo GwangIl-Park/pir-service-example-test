@@ -23,28 +23,36 @@ struct ServerCommand: AsyncParsableCommand {
     static let configuration: CommandConfiguration = .init(
         commandName: "PIRService")
 
-    @Option var hostname: String = "127.0.0.1"
-    @Option var port: Int = 8080
-    @Argument var configFile: String
+    @Option var hostname: String = "0.0.0.0"
+    @Option(name: .customLong("http-port")) var httpPort: Int = 8080
+    @Option(name: .customLong("tcp-port")) var tcpPort: Int = 9000
+    @Option(name: .customLong("service-config-file")) var serviceConfigFile: String
+    @Option(name: .customLong("url-config-file")) var urlConfigFile: String
 
     func run() async throws {
         let usecaseStore = UsecaseStore()
         let privacyPassState = try PrivacyPassState(userAuthenticator: UserAuthenticator())
 
         let app = try await buildApplication(
-            configuration: .init(address: .hostname(hostname, port: port)),
+            configuration: .init(address: .hostname(hostname, port: httpPort)),
             usecaseStore: usecaseStore,
             privacyPassState: privacyPassState)
 
         let reloadService = ReloadService(
-            configFile: URL(fileURLWithPath: configFile),
+            configFile: URL(fileURLWithPath: serviceConfigFile),
             usecaseStore: usecaseStore,
             privacyPassState: privacyPassState,
             logger: app.logger)
 
+        let tcpService = PIRProcessDatabaseTCPService(
+            host: hostname,
+            port: tcpPort,
+            configFile: URL(fileURLWithPath: urlConfigFile),
+            logger: app.logger)
+
         try await reloadService.reloadConfiguration()
 
-        let serviceGroup = ServiceGroup(configuration: .init(services: [app, reloadService], logger: app.logger))
+        let serviceGroup = ServiceGroup(configuration: .init(services: [app, reloadService, tcpService], logger: app.logger))
         try await serviceGroup.run()
     }
 }
