@@ -1,7 +1,11 @@
 import Foundation
 import NIO
 import Logging
+#if canImport(Darwin)
 import Darwin
+#elseif canImport(Glibc)
+import Glibc
+#endif
 
 /// TCP 기반으로 PIR 데이터베이스 처리 요청을 받기 위한 핸들러의 골격입니다.
 /// 현재는 HTTP 컨트롤러(`PIRProcessDatabaseController`)와 동일한 내부 처리기
