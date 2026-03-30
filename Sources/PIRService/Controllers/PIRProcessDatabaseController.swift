@@ -1,6 +1,10 @@
 import Foundation
 import Hummingbird
+#if canImport(Darwin)
 import Darwin
+#elseif canImport(Glibc)
+import Glibc
+#endif
 
 struct PIRProcessDatabaseController {
     /// 기본 설정 파일 경로 (요청 바디가 없을 때 사용). 환경변수 `PIR_PROCESS_DATABASE_CONFIG` 또는 data/url-config.json
