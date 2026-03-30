@@ -19,7 +19,7 @@ public struct BloomFilter: @unchecked Sendable {
     private var bits: Data
 
     public init(items: [String], falsePositiveTolerance: Double = 0.001) throws {
-        try self.init(items: items, falsePositiveTolerance: falsePositiveTolerance, murmurSeed: arc4random())
+        try self.init(items: items, falsePositiveTolerance: falsePositiveTolerance, murmurSeed: UInt32.random(in: 0...UInt32.max))
     }
 
     init(items: [String], falsePositiveTolerance: Double = 0.001, murmurSeed: UInt32) throws {
