@@ -26,10 +26,16 @@ struct ServerCommand: AsyncParsableCommand {
     @Option var hostname: String = "0.0.0.0"
     @Option(name: .customLong("http-port")) var httpPort: Int = 8080
     @Option(name: .customLong("tcp-port")) var tcpPort: Int = 9000
+    @Option(name: .customLong("log-file"), help: "Append logs to this path (stderr unchanged). Omit to log to stderr only.")
+    var logFile: String = ""
     @Option(name: .customLong("service-config-file")) var serviceConfigFile: String
     @Option(name: .customLong("url-config-file")) var urlConfigFile: String
 
     func run() async throws {
+        if !logFile.isEmpty {
+            try LoggingBootstrap.bootstrapStderrAndFile(logFileURL: URL(fileURLWithPath: logFile))
+        }
+
         let usecaseStore = UsecaseStore()
         let prefilterStore = PrefilterStore()
         let privacyPassState = try PrivacyPassState(userAuthenticator: UserAuthenticator())
