@@ -140,6 +140,7 @@ actor ReloadService: Service {
             if latestPrefilterSnapshot == nil {
                 let sourceFile = usecase.prefilterInputFile ?? "data/input.txtpb"
                 let outputFile = usecase.prefilterOutputFile ?? "data/prefilter.json"
+                logger.info("Generating URL prefilter from \(sourceFile)")
                 let urls = try loadPrefilterURLs(from: sourceFile)
                 if !urls.isEmpty {
                     let filter = try BloomFilter(items: urls)
