@@ -67,6 +67,8 @@ struct ServerConfiguration: Codable {
 
 actor ReloadService: Service {
     let configFile: URL
+    /// `InternalPIRProcessDatabase.run`에 넘기는 JSON 경로(`--url-config-file`). 베이스 params가 없을 때 사용합니다.
+    let processDatabaseConfigPath: String?
     let usecaseStore: UsecaseStore
     let prefilterStore: PrefilterStore
     let privacyPassState: PrivacyPassState<UserAuthenticator>
@@ -74,12 +76,14 @@ actor ReloadService: Service {
 
     init(
         configFile: URL,
+        processDatabaseConfigPath: String? = nil,
         usecaseStore: UsecaseStore,
         prefilterStore: PrefilterStore,
         privacyPassState: PrivacyPassState<UserAuthenticator>,
         logger: Logger)
     {
         self.configFile = configFile
+        self.processDatabaseConfigPath = processDatabaseConfigPath
         self.usecaseStore = usecaseStore
         self.prefilterStore = prefilterStore
         self.privacyPassState = privacyPassState
@@ -134,7 +138,10 @@ actor ReloadService: Service {
                 try await usecaseStore.set(name: usecase.name, usecase: nil, versionCount: versionCount)
                 continue
             }
-            let loaded = try loadUsecase(usecase: usecase)
+            let loaded = try await loadUsecase(
+                usecase: usecase,
+                processDatabaseConfigPath: processDatabaseConfigPath,
+                logger: logger)
             try await usecaseStore.set(name: usecase.name, usecase: loaded, versionCount: versionCount)
 
             if latestPrefilterSnapshot == nil {

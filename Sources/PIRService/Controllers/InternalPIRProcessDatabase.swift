@@ -259,7 +259,7 @@ enum InternalPIRProcessDatabase {
             try Apple_SwiftHomomorphicEncryption_Pir_V1_KeywordDatabase(from: config.inputDatabase).native()
 
         let resolved = try config.resolve(for: database, scheme: scheme)
-        logger.info("Processing database with configuration: \(resolved)")
+        logger.info("Processing database")
         let keywordConfig = try KeywordPirConfig(
             dimensionCount: 2,
             cuckooTableConfig: resolved.cuckooTableConfig,
@@ -363,22 +363,6 @@ enum InternalPIRProcessDatabase {
             shard: shard,
             with: processArgs,
             onEvent: logEvent)
-
-        if config.trialsPerShard > 0 {
-            guard let row = shard.rows.first else {
-                throw PirError.emptyDatabase
-            }
-            logger.info("Validating shard")
-            let validationResults = try ProcessKeywordDatabase
-                .validateShard(
-                    shard: processed,
-                    row: KeywordValuePair(keyword: row.key, value: row.value),
-                    trials: config.trialsPerShard,
-                    context: context)
-            // 원본 구현은 ShardValidationResult.description() 확장을 사용하지만,
-            // 이 타깃에서는 접근이 어려워 간단히 debug description만 남깁니다.
-            logger.info("ValidationResults \(String(describing: validationResults))")
-        }
 
         let outputDatabaseFilename = config.outputDatabase.replacingOccurrences(
             of: "SHARD_ID",

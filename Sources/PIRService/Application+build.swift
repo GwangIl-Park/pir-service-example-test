@@ -21,6 +21,18 @@ import NIO
 import PrivateInformationRetrieval
 import Util
 
+/// `PirUsecase` 로드 시 베이스 params 파일이 없고, DB 생성용 JSON 경로도 없을 때 발생합니다.
+enum PirUsecaseLoadError: Error, LocalizedError {
+    case missingParametersFile(String)
+
+    var errorDescription: String? {
+        switch self {
+        case .missingParametersFile(let path):
+            "PIR parameters file not found at \(path). Pass --url-config-file or run InternalPIRProcessDatabase first."
+        }
+    }
+}
+
 struct AppContext: IdentifiedRequestContext, AuthenticatedRequestContext, PlatformRequestContext, RequestContext {
     var coreContext: CoreRequestContextStorage
     var userIdentifier: UserIdentifier
@@ -40,7 +52,24 @@ struct AppContext: IdentifiedRequestContext, AuthenticatedRequestContext, Platfo
     }
 }
 
-func loadUsecase(usecase: ServerConfiguration.Usecase) throws -> Usecase {
+/// - Parameters:
+///   - processDatabaseConfigPath: `InternalPIRProcessDatabase`용 JSON 경로(예: `--url-config-file`). 베이스
+///     `\(fileStem)-0.params.txtpb`가 없을 때 한 번 `InternalPIRProcessDatabase.run`을 호출합니다.
+func loadUsecase(
+    usecase: ServerConfiguration.Usecase,
+    processDatabaseConfigPath: String?,
+    logger: Logger? = nil
+) async throws -> Usecase {
+    let baseParamsPath = "\(usecase.fileStem)-0.params.txtpb"
+    if !FileManager.default.fileExists(atPath: baseParamsPath) {
+        guard let processDatabaseConfigPath else {
+            throw PirUsecaseLoadError.missingParametersFile(baseParamsPath)
+        }
+        let log = logger ?? Logger(label: "PIRService.loadUsecase")
+        log.info(
+            "Missing PIR parameters at \(baseParamsPath); running InternalPIRProcessDatabase with \(processDatabaseConfigPath)")
+        try await InternalPIRProcessDatabase.run(configFilePath: processDatabaseConfigPath, parallel: true)
+    }
     do {
         return try PirUsecase<MulPirServer<Bfv<UInt32>>>(usecase: usecase)
     } catch {

@@ -48,6 +48,7 @@ struct ServerCommand: AsyncParsableCommand {
 
         let reloadService = ReloadService(
             configFile: URL(fileURLWithPath: serviceConfigFile),
+            processDatabaseConfigPath: urlConfigFile,
             usecaseStore: usecaseStore,
             prefilterStore: prefilterStore,
             privacyPassState: privacyPassState,
