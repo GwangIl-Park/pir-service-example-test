@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+import BloomFilterCore
 import Foundation
 import Logging
 import PrivateInformationRetrieval
@@ -150,7 +151,7 @@ actor ReloadService: Service {
                 logger.info("Generating URL prefilter from \(sourceFile)")
                 let urls = try loadPrefilterURLs(from: sourceFile)
                 if !urls.isEmpty {
-                    let filter = try BloomFilter(items: urls)
+                    let filter = BloomFilter(items: urls)
                     try savePrefilter(filter: filter, to: outputFile)
                     latestPrefilterSnapshot = .init(
                         filter: filter,

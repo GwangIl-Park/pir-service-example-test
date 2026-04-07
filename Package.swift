@@ -43,9 +43,11 @@ let package = Package(
         .package(url: "https://github.com/swiftlang/swift-docc-plugin", from: "1.0.0"),
     ],
     targets: [
+        .target(name: "BloomFilterCore", swiftSettings: swiftSettings),
         .executableTarget(
             name: "PIRService",
             dependencies: [
+                "BloomFilterCore",
                 "PrivacyPass", "Util",
                 .product(name: "ArgumentParser", package: "swift-argument-parser"),
                 .product(name: "Crypto", package: "swift-crypto"),
@@ -61,6 +63,7 @@ let package = Package(
         .executableTarget(
             name: "PrefilterClient",
             dependencies: [
+                "BloomFilterCore",
                 .product(name: "ArgumentParser", package: "swift-argument-parser"),
             ],
             swiftSettings: swiftSettings),

@@ -1,3 +1,4 @@
+import BloomFilterCore
 import Foundation
 
 actor PrefilterStore {
