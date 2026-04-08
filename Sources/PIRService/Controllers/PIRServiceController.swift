@@ -44,7 +44,8 @@ struct PIRServiceController {
             as: Apple_SwiftHomomorphicEncryption_Api_Shared_V1_EvaluationKeys.self,
             context: context)
         let evaluationKeys = decodedRequest.message
-        print("endpoint=key request_size_bytes=\(decodedRequest.requestSizeBytes) response_size_bytes=0")
+        context.logger.info(
+            "endpoint=key request_size_bytes=\(decodedRequest.requestSizeBytes) response_size_bytes=0")
         for evaluationKey in evaluationKeys.keys {
             guard evaluationKey.hasMetadata, evaluationKey.hasEvaluationKey else {
                 throw HTTPError(.badRequest, message: "Evaluation key has unset fields")
@@ -122,7 +123,7 @@ struct PIRServiceController {
             msg.keyInfo = keyStatuses
         }
         let responseBytes = try configResponse.serializedData()
-        print(
+        context.logger.info(
             "endpoint=config request_size_bytes=\(decodedRequest.requestSizeBytes) response_size_bytes=\(responseBytes.count)")
         return Response(
             status: .ok,
@@ -187,7 +188,7 @@ struct PIRServiceController {
             msg.responses = responses
         }
         let responseBytes = try apiResponses.serializedData()
-        print(
+        context.logger.info(
             "endpoint=queries request_size_bytes=\(decodedRequest.requestSizeBytes) response_size_bytes=\(responseBytes.count)")
         return Response(
             status: .ok,

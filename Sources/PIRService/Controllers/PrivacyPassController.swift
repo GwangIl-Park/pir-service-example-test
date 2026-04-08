@@ -48,7 +48,7 @@ struct PrivacyPassController<UserAuthenticator: UserTokenAuthenticator> {
         let issuerRequestUri = URL(string: "/issue")!
         let directory = TokenIssuerDirectory(issuerRequestUri: issuerRequestUri, tokenKeys: tokenKeys)
         let responseBytes = try JSONEncoder().encode(directory)
-        print(
+        context.logger.info(
             "endpoint=private-token-issuer-directory request_size_bytes=\(requestBody.readableBytes) response_size_bytes=\(responseBytes.count)")
         return directory
     }
@@ -62,13 +62,13 @@ struct PrivacyPassController<UserAuthenticator: UserTokenAuthenticator> {
         }
         let publicKey = issuer.publicKey
         let spki = try publicKey.spki()
-        print(
+        context.logger.info(
             "endpoint=token-key-for-user-token request_size_bytes=\(requestBody.readableBytes) response_size_bytes=\(spki.count)")
         return publicKey
     }
 
     @Sendable
-    func issueToken(request: Request, context _: AppContext) async throws -> PrivacyPass.TokenResponse {
+    func issueToken(request: Request, context: AppContext) async throws -> PrivacyPass.TokenResponse {
         let userTier = try await authenticateUserToken(request: request)
         // decode tokenRequest
         var tokenRequestByteBuffer = try await request.body.collect(upTo: PrivacyPass.TokenRequest.sizeInBytes)
@@ -84,7 +84,7 @@ struct PrivacyPassController<UserAuthenticator: UserTokenAuthenticator> {
         }
 
         let tokenResponse = try issuer.issue(request: tokenRequest)
-        print(
+        context.logger.info(
             "endpoint=issue request_size_bytes=\(requestSizeBytes) response_size_bytes=\(tokenResponse.bytes().count)")
         return tokenResponse
     }
