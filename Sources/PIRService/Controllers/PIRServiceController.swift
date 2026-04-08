@@ -16,6 +16,7 @@ import Foundation
 import HomomorphicEncryptionProtobuf
 import Hummingbird
 import HummingbirdCompression
+import NIOCore
 import PrivateInformationRetrievalProtobuf
 import Util
 
@@ -39,9 +40,11 @@ struct PIRServiceController {
 
     @Sendable
     func key(_ request: Request, context: AppContext) async throws -> Response {
-        let evaluationKeys = try await request.decodeProto(
+        let decodedRequest = try await request.decodeProtoWithSize(
             as: Apple_SwiftHomomorphicEncryption_Api_Shared_V1_EvaluationKeys.self,
             context: context)
+        let evaluationKeys = decodedRequest.message
+        print("endpoint=key request_size_bytes=\(decodedRequest.requestSizeBytes) response_size_bytes=0")
         for evaluationKey in evaluationKeys.keys {
             guard evaluationKey.hasMetadata, evaluationKey.hasEvaluationKey else {
                 throw HTTPError(.badRequest, message: "Evaluation key has unset fields")
@@ -56,9 +59,10 @@ struct PIRServiceController {
     @Sendable
     func config(_ request: Request, context: AppContext) async throws -> some ResponseGenerator {
         context.logger.info("Tier = \(context.userTier)")
-        let configRequest = try await request.decodeProto(
+        let decodedRequest = try await request.decodeProtoWithSize(
             as: Apple_SwiftHomomorphicEncryption_Api_Pir_V1_ConfigRequest.self,
             context: context)
+        let configRequest = decodedRequest.message
         let requestedUsecases = if configRequest.usecases.isEmpty {
             await usecases.getAll()
         } else {
@@ -113,18 +117,25 @@ struct PIRServiceController {
 
         let keyStatuses: [Apple_SwiftHomomorphicEncryption_Api_Shared_V1_KeyStatus] =
             try await .init(keyStatusesSequence)
-        return Protobuf(Apple_SwiftHomomorphicEncryption_Api_Pir_V1_ConfigResponse.with { configResponse in
-            configResponse.configs = configs
-            configResponse.keyInfo = keyStatuses
-        })
+        let configResponse = Apple_SwiftHomomorphicEncryption_Api_Pir_V1_ConfigResponse.with { msg in
+            msg.configs = configs
+            msg.keyInfo = keyStatuses
+        }
+        let responseBytes = try configResponse.serializedData()
+        print(
+            "endpoint=config request_size_bytes=\(decodedRequest.requestSizeBytes) response_size_bytes=\(responseBytes.count)")
+        return Response(
+            status: .ok,
+            body: ResponseBody(byteBuffer: ByteBuffer(bytes: responseBytes)))
     }
 
     @Sendable
     func queries(_ request: Request, context: AppContext) async throws -> some ResponseGenerator {
         let startTime = Date.now
-        let requests = try await request.decodeProto(
+        let decodedRequest = try await request.decodeProtoWithSize(
             as: Apple_SwiftHomomorphicEncryption_Api_Pir_V1_Requests.self,
             context: context)
+        let requests = decodedRequest.message
 
         defer {
             let duration = Date.now.timeIntervalSince(startTime)
@@ -172,8 +183,14 @@ struct PIRServiceController {
             }
         }
         let responses: [Apple_SwiftHomomorphicEncryption_Api_Pir_V1_Response] = try await .init(responsesSequence)
-        return Protobuf(Apple_SwiftHomomorphicEncryption_Api_Pir_V1_Responses.with { apiResponses in
-            apiResponses.responses = responses
-        })
+        let apiResponses = Apple_SwiftHomomorphicEncryption_Api_Pir_V1_Responses.with { msg in
+            msg.responses = responses
+        }
+        let responseBytes = try apiResponses.serializedData()
+        print(
+            "endpoint=queries request_size_bytes=\(decodedRequest.requestSizeBytes) response_size_bytes=\(responseBytes.count)")
+        return Response(
+            status: .ok,
+            body: ResponseBody(byteBuffer: ByteBuffer(bytes: responseBytes)))
     }
 }

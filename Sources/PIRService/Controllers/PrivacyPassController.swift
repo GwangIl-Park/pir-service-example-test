@@ -35,7 +35,8 @@ struct PrivacyPassController<UserAuthenticator: UserTokenAuthenticator> {
     }
 
     @Sendable
-    func tokenIssuerDirectory(request _: Request, context _: AppContext) async throws -> TokenIssuerDirectory {
+    func tokenIssuerDirectory(request: Request, context: AppContext) async throws -> TokenIssuerDirectory {
+        let requestBody = try await request.body.collect(upTo: context.maxUploadSize)
         let tokenKeys = try await state.issuers.values.map(\.privateKey.publicKey).map { publicKey in
             let spki = try publicKey.spki()
             return TokenIssuerDirectory.TokenKey(
@@ -45,16 +46,25 @@ struct PrivacyPassController<UserAuthenticator: UserTokenAuthenticator> {
         }
         // swiftlint:disable:next force_unwrapping
         let issuerRequestUri = URL(string: "/issue")!
-        return TokenIssuerDirectory(issuerRequestUri: issuerRequestUri, tokenKeys: tokenKeys)
+        let directory = TokenIssuerDirectory(issuerRequestUri: issuerRequestUri, tokenKeys: tokenKeys)
+        let responseBytes = try JSONEncoder().encode(directory)
+        print(
+            "endpoint=private-token-issuer-directory request_size_bytes=\(requestBody.readableBytes) response_size_bytes=\(responseBytes.count)")
+        return directory
     }
 
     @Sendable
-    func tokenKeyForUserToken(request: Request, context _: AppContext) async throws -> PrivacyPass.PublicKey {
+    func tokenKeyForUserToken(request: Request, context: AppContext) async throws -> PrivacyPass.PublicKey {
         let userTier = try await authenticateUserToken(request: request)
+        let requestBody = try await request.body.collect(upTo: context.maxUploadSize)
         guard let issuer = await state.issuers[userTier] else {
             throw HTTPError(.internalServerError, message: "Could not find issuer for tier \(userTier)")
         }
-        return issuer.publicKey
+        let publicKey = issuer.publicKey
+        let spki = try publicKey.spki()
+        print(
+            "endpoint=token-key-for-user-token request_size_bytes=\(requestBody.readableBytes) response_size_bytes=\(spki.count)")
+        return publicKey
     }
 
     @Sendable
@@ -62,6 +72,7 @@ struct PrivacyPassController<UserAuthenticator: UserTokenAuthenticator> {
         let userTier = try await authenticateUserToken(request: request)
         // decode tokenRequest
         var tokenRequestByteBuffer = try await request.body.collect(upTo: PrivacyPass.TokenRequest.sizeInBytes)
+        let requestSizeBytes = tokenRequestByteBuffer.readableBytes
         guard let tokenRequestBytes = tokenRequestByteBuffer.readBytes(length: PrivacyPass.TokenRequest.sizeInBytes)
         else {
             throw PrivacyPass.PrivacyPassError(code: .invalidTokenRequestSize)
@@ -72,6 +83,9 @@ struct PrivacyPassController<UserAuthenticator: UserTokenAuthenticator> {
             throw HTTPError(.internalServerError, message: "Could not find issuer for tier \(userTier)")
         }
 
-        return try issuer.issue(request: tokenRequest)
+        let tokenResponse = try issuer.issue(request: tokenRequest)
+        print(
+            "endpoint=issue request_size_bytes=\(requestSizeBytes) response_size_bytes=\(tokenResponse.bytes().count)")
+        return tokenResponse
     }
 }
