@@ -51,8 +51,6 @@ struct ServerConfiguration: Codable {
         let fileStem: String
         let shardCount: Int
         let versionCount: Int?
-        let prefilterInputFile: String?
-        let prefilterOutputFile: String?
         let symmetricPirArguments: SymmetricPirArguments?
     }
 
@@ -139,7 +137,7 @@ actor ReloadService: Service {
             // `InternalPIRProcessDatabase` with `\(usecase.fileStem)-config.json` located next to `service-config-file`.
             let derivedProcessConfigPath = configFile
                 .deletingLastPathComponent()
-                .appendingPathComponent("\(usecase.fileStem)-config.json")
+                .appendingPathComponent("data/\(usecase.fileStem)-config.json")
                 .path
 
             let loaded = try await loadUsecase(
@@ -149,14 +147,8 @@ actor ReloadService: Service {
             try await usecaseStore.set(name: usecase.name, usecase: loaded, versionCount: versionCount)
 
             if latestPrefilterSnapshot == nil {
-                guard let sourceFile = usecase.prefilterInputFile,
-                      let outputFile = usecase.prefilterOutputFile
-                else {
-                    logger.info(
-                        "Skipped prefilter generation because prefilterInputFile/prefilterOutputFile is missing for usecase",
-                        metadata: ["usecase": .string(usecase.name)])
-                    continue
-                }
+                let sourceFile = "\(usecase.fileStem).txtpb"
+                let outputFile = "\(usecase.fileStem)-prefilter.json"
 
                 logger.info("Generating URL prefilter from \(sourceFile)")
                 let urls = try loadPrefilterURLs(from: sourceFile)

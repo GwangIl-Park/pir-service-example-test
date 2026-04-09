@@ -231,11 +231,40 @@ enum InternalPIRProcessDatabase {
 
     private static let logger = Logger(label: "PIRProcessDatabase")
 
-    static func run(configFilePath: String, parallel: Bool = true) async throws {
+    /// `outputDatabase` / `outputPirParameters`에서 마지막 경로 조각의 `...-SHARD_ID...` 접두를 `fileStem`에 맞춥니다.
+    /// 예: `url-SHARD_ID.bin` + fileStem `fixed` → `fixed-SHARD_ID.bin`
+    private static func rewriteShardPathForFileStem(_ path: String, fileStem: String) -> String {
+        guard path.contains("SHARD_ID") else { return path }
+        let url = URL(fileURLWithPath: path)
+        let last = url.lastPathComponent
+        guard let shardRange = last.range(of: "SHARD_ID") else { return path }
+        let suffix = String(last[shardRange.lowerBound...])
+        let newLast = "\(fileStem)-\(suffix)"
+        return url.deletingLastPathComponent().appendingPathComponent(newLast).path
+    }
+
+    /// - Parameter outputFileStem: 지정 시 JSON의 출력 파일명 stem을 이 값으로 맞춥니다(예: `url-` → `{fileStem}-`).
+    static func run(configFilePath: String, outputFileStem: String? = nil, parallel: Bool = true) async throws {
         do {
             let configURL = URL(fileURLWithPath: configFilePath)
             let configData = try Data(contentsOf: configURL)
-            let config = try JSONDecoder().decode(Arguments.self, from: configData)
+            var config = try JSONDecoder().decode(Arguments.self, from: configData)
+            if let stem = outputFileStem {
+                config = Arguments(
+                    inputDatabase: config.inputDatabase,
+                    outputDatabase: rewriteShardPathForFileStem(config.outputDatabase, fileStem: stem),
+                    outputPirParameters: rewriteShardPathForFileStem(config.outputPirParameters, fileStem: stem),
+                    rlweParameters: config.rlweParameters,
+                    outputEvaluationKeyConfig: config.outputEvaluationKeyConfig,
+                    sharding: config.sharding,
+                    shardingFunction: config.shardingFunction,
+                    cuckooTableArguments: config.cuckooTableArguments,
+                    algorithm: config.algorithm,
+                    keyCompression: config.keyCompression,
+                    useMaxSerializedBucketSize: config.useMaxSerializedBucketSize,
+                    symmetricPirArguments: config.symmetricPirArguments,
+                    trialsPerShard: config.trialsPerShard)
+            }
             if config.rlweParameters.supportsScalar(UInt32.self) {
                 try await process(config: config, scheme: Bfv<UInt32>.self, parallel: parallel)
             } else {

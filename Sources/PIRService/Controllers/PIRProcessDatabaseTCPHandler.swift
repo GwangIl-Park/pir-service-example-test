@@ -59,7 +59,10 @@ final class PIRProcessDatabaseTCPHandler: ChannelInboundHandler, @unchecked Send
                             "usecase": .string(usecase.name),
                             "configFilePath": .string(derivedConfigURL.path),
                         ])
-                    try await InternalPIRProcessDatabase.run(configFilePath: derivedConfigURL.path, parallel: true)
+                    try await InternalPIRProcessDatabase.run(
+                        configFilePath: derivedConfigURL.path,
+                        outputFileStem: usecase.fileStem,
+                        parallel: true)
                 }
             } else if received == "RELOAD" {
                 let result = raise(SIGHUP)

@@ -68,7 +68,10 @@ func loadUsecase(
         let log = logger ?? Logger(label: "PIRService.loadUsecase")
         log.info(
             "Missing PIR parameters at \(baseParamsPath); running InternalPIRProcessDatabase with \(processDatabaseConfigPath)")
-        try await InternalPIRProcessDatabase.run(configFilePath: processDatabaseConfigPath, parallel: true)
+        try await InternalPIRProcessDatabase.run(
+            configFilePath: processDatabaseConfigPath,
+            outputFileStem: usecase.fileStem,
+            parallel: true)
     }
     do {
         return try PirUsecase<MulPirServer<Bfv<UInt32>>>(usecase: usecase)
