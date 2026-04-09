@@ -52,7 +52,7 @@ final class PIRProcessDatabaseTCPHandler: ChannelInboundHandler, @unchecked Send
                 let dirURL = self.configFile.deletingLastPathComponent()
 
                 for usecase in config.usecases {
-                    let derivedConfigURL = dirURL.appendingPathComponent("\(usecase.fileStem)-config.json")
+                    let derivedConfigURL = dirURL.appendingPathComponent("data/\(usecase.fileStem)-config.json")
                     self.logger.info(
                         "TCP PROCESS: running InternalPIRProcessDatabase",
                         metadata: [
