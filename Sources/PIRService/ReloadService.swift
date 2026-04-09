@@ -68,8 +68,6 @@ struct ServerConfiguration: Codable {
 
 actor ReloadService: Service {
     let configFile: URL
-    /// `InternalPIRProcessDatabase.run`에 넘기는 JSON 경로(`--url-config-file`). 베이스 params가 없을 때 사용합니다.
-    let processDatabaseConfigPath: String?
     let usecaseStore: UsecaseStore
     let prefilterStore: PrefilterStore
     let privacyPassState: PrivacyPassState<UserAuthenticator>
@@ -77,14 +75,12 @@ actor ReloadService: Service {
 
     init(
         configFile: URL,
-        processDatabaseConfigPath: String? = nil,
         usecaseStore: UsecaseStore,
         prefilterStore: PrefilterStore,
         privacyPassState: PrivacyPassState<UserAuthenticator>,
         logger: Logger)
     {
         self.configFile = configFile
-        self.processDatabaseConfigPath = processDatabaseConfigPath
         self.usecaseStore = usecaseStore
         self.prefilterStore = prefilterStore
         self.privacyPassState = privacyPassState
@@ -139,15 +135,29 @@ actor ReloadService: Service {
                 try await usecaseStore.set(name: usecase.name, usecase: nil, versionCount: versionCount)
                 continue
             }
+            // If `\(usecase.fileStem)-0.params.txtpb` is missing, generate PIR DB inputs by running
+            // `InternalPIRProcessDatabase` with `\(usecase.fileStem)-config.json` located next to `service-config-file`.
+            let derivedProcessConfigPath = configFile
+                .deletingLastPathComponent()
+                .appendingPathComponent("\(usecase.fileStem)-config.json")
+                .path
+
             let loaded = try await loadUsecase(
                 usecase: usecase,
-                processDatabaseConfigPath: processDatabaseConfigPath,
+                processDatabaseConfigPath: derivedProcessConfigPath,
                 logger: logger)
             try await usecaseStore.set(name: usecase.name, usecase: loaded, versionCount: versionCount)
 
             if latestPrefilterSnapshot == nil {
-                let sourceFile = usecase.prefilterInputFile ?? "data/input.txtpb"
-                let outputFile = usecase.prefilterOutputFile ?? "data/prefilter.json"
+                guard let sourceFile = usecase.prefilterInputFile,
+                      let outputFile = usecase.prefilterOutputFile
+                else {
+                    logger.info(
+                        "Skipped prefilter generation because prefilterInputFile/prefilterOutputFile is missing for usecase",
+                        metadata: ["usecase": .string(usecase.name)])
+                    continue
+                }
+
                 logger.info("Generating URL prefilter from \(sourceFile)")
                 let urls = try loadPrefilterURLs(from: sourceFile)
                 if !urls.isEmpty {

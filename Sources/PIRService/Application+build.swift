@@ -28,7 +28,7 @@ enum PirUsecaseLoadError: Error, LocalizedError {
     var errorDescription: String? {
         switch self {
         case .missingParametersFile(let path):
-            "PIR parameters file not found at \(path). Pass --url-config-file or run InternalPIRProcessDatabase first."
+            "PIR parameters file not found at \(path). If needed, generate PIR inputs by running InternalPIRProcessDatabase with `<usecase.fileStem>-config.json` next to service-config-file."
         }
     }
 }
@@ -53,7 +53,7 @@ struct AppContext: IdentifiedRequestContext, AuthenticatedRequestContext, Platfo
 }
 
 /// - Parameters:
-///   - processDatabaseConfigPath: `InternalPIRProcessDatabase`용 JSON 경로(예: `--url-config-file`). 베이스
+///   - processDatabaseConfigPath: `InternalPIRProcessDatabase`용 JSON 경로. 베이스
 ///     `\(fileStem)-0.params.txtpb`가 없을 때 한 번 `InternalPIRProcessDatabase.run`을 호출합니다.
 func loadUsecase(
     usecase: ServerConfiguration.Usecase,

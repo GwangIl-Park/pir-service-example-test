@@ -41,9 +41,26 @@ final class PIRProcessDatabaseTCPHandler: ChannelInboundHandler, @unchecked Send
             "payload": "\(received)"
         ])
 
+        let channel = context.channel
+        let allocator = channel.allocator
         context.eventLoop.makeFutureWithTask {
             if received == "PROCESS" {
-                try await InternalPIRProcessDatabase.run(configFilePath: self.configFile.path, parallel: true)
+                // `configFile` here is the *service* config; derive each usecase config as:
+                //   <service-config-dir>/{usecase.fileStem}-config.json
+                let configData = try Data(contentsOf: self.configFile)
+                let config = try JSONDecoder().decode(ServerConfiguration.self, from: configData)
+                let dirURL = self.configFile.deletingLastPathComponent()
+
+                for usecase in config.usecases {
+                    let derivedConfigURL = dirURL.appendingPathComponent("\(usecase.fileStem)-config.json")
+                    self.logger.info(
+                        "TCP PROCESS: running InternalPIRProcessDatabase",
+                        metadata: [
+                            "usecase": .string(usecase.name),
+                            "configFilePath": .string(derivedConfigURL.path),
+                        ])
+                    try await InternalPIRProcessDatabase.run(configFilePath: derivedConfigURL.path, parallel: true)
+                }
             } else if received == "RELOAD" {
                 let result = raise(SIGHUP)
                 if result != 0 {
@@ -56,12 +73,11 @@ final class PIRProcessDatabaseTCPHandler: ChannelInboundHandler, @unchecked Send
         }.whenComplete { result in
             switch result {
             case .success:
-                let okBuffer = context.channel.allocator.buffer(string: "OK\n")
-                context.writeAndFlush(self.wrapOutboundOut(okBuffer), promise: nil)
+                let okBuffer = allocator.buffer(string: "OK\n")
+                channel.writeAndFlush(self.wrapOutboundOut(okBuffer), promise: nil)
             case .failure(let error):
-                let errorBuffer = context.channel.allocator.buffer(
-                    string: "ERROR: \(error.localizedDescription)\n")
-                context.writeAndFlush(self.wrapOutboundOut(errorBuffer), promise: nil)
+                let errorBuffer = allocator.buffer(string: "ERROR: \(error.localizedDescription)\n")
+                channel.writeAndFlush(self.wrapOutboundOut(errorBuffer), promise: nil)
             }
         }
     }

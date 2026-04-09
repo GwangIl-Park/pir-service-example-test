@@ -29,7 +29,6 @@ struct ServerCommand: AsyncParsableCommand {
     @Option(name: .customLong("log-file"), help: "Append logs to this path (stderr unchanged). Omit to log to stderr only.")
     var logFile: String = ""
     @Option(name: .customLong("service-config-file")) var serviceConfigFile: String
-    @Option(name: .customLong("url-config-file")) var urlConfigFile: String
 
     func run() async throws {
         if !logFile.isEmpty {
@@ -48,7 +47,6 @@ struct ServerCommand: AsyncParsableCommand {
 
         let reloadService = ReloadService(
             configFile: URL(fileURLWithPath: serviceConfigFile),
-            processDatabaseConfigPath: urlConfigFile,
             usecaseStore: usecaseStore,
             prefilterStore: prefilterStore,
             privacyPassState: privacyPassState,
@@ -57,7 +55,7 @@ struct ServerCommand: AsyncParsableCommand {
         let tcpService = PIRProcessDatabaseTCPService(
             host: hostname,
             port: tcpPort,
-            configFile: URL(fileURLWithPath: urlConfigFile),
+            configFile: URL(fileURLWithPath: serviceConfigFile),
             logger: app.logger)
 
         try await reloadService.reloadConfiguration()
