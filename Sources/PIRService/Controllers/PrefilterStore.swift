@@ -3,20 +3,27 @@ import Foundation
 
 actor PrefilterStore {
     struct Snapshot: Codable, Sendable {
-        let filter: BloomFilter
+        let usecase: String
         let generatedAt: Date
         let sourceURLCount: Int
         let sourceFile: String
         let outputFile: String
+        let version: String?
+        let size: Int
+        let sha256: String
     }
 
-    private var snapshot: Snapshot?
+    private var snapshots: [String: Snapshot] = [:]
 
-    func set(_ snapshot: Snapshot?) {
-        self.snapshot = snapshot
+    func set(_ snapshot: Snapshot) {
+        snapshots[snapshot.usecase] = snapshot
     }
 
-    func get() -> Snapshot? {
-        snapshot
+    func setAll(_ snapshots: [String: Snapshot]) {
+        self.snapshots = snapshots
+    }
+
+    func get(usecase: String) -> Snapshot? {
+        snapshots[usecase]
     }
 }

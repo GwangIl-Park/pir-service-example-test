@@ -124,7 +124,7 @@ actor ReloadService: Service {
         }
         await privacyPassState.userAuthenticator.update(allowList: allowedUsers)
 
-        var latestPrefilterSnapshot: PrefilterStore.Snapshot?
+        var prefilterSnapshots: [String: PrefilterStore.Snapshot] = [:]
         for usecase in config.usecases {
             // default to two versions
             let versionCount = usecase.versionCount ?? 2
@@ -146,41 +146,42 @@ actor ReloadService: Service {
                 logger: logger)
             try await usecaseStore.set(name: usecase.name, usecase: loaded, versionCount: versionCount)
 
-            if latestPrefilterSnapshot == nil {
-                let sourceFile = "\(usecase.fileStem).txtpb"
-                let outputFile = "\(usecase.fileStem)-prefilter.json"
+            let sourceFile = "\(usecase.fileStem).txtpb"
+            let outputFile = "\(usecase.fileStem)-prefilter.json"
 
-                logger.info("Generating URL prefilter from \(sourceFile)")
-                let urls = try loadPrefilterURLs(from: sourceFile)
-                if !urls.isEmpty {
-                    let filter = BloomFilter(items: urls)
-                    let generatedAt = Date()
-                    let version = try nextPrefilterVersion(
-                        in: URL(fileURLWithPath: outputFile).deletingLastPathComponent(),
-                        generatedAt: generatedAt)
-                    try savePrefilter(
-                        filter: filter,
-                        to: outputFile,
-                        version: version,
-                        generatedAt: generatedAt)
-                    latestPrefilterSnapshot = .init(
-                        filter: filter,
-                        generatedAt: generatedAt,
-                        sourceURLCount: urls.count,
-                        sourceFile: sourceFile,
-                        outputFile: outputFile)
-                    let datName = (outputFile as NSString).deletingPathExtension + ".dat"
-                    logger.info("""
-                        Generated URL prefilters with \(urls.count) URLs from \(sourceFile), \
-                        saved Bloom metadata to \(outputFile), filter bytes to \(datName), version \(version)
-                        """)
-                } else {
-                    logger.warning("Skipped Bloom filter generation because no URLs were found in \(sourceFile)")
-                }
+            logger.info("Generating URL prefilter from \(sourceFile)")
+            let urls = try loadPrefilterURLs(from: sourceFile)
+            if !urls.isEmpty {
+                let filter = BloomFilter(items: urls)
+                let generatedAt = Date()
+                let version = try nextPrefilterVersion(
+                    in: URL(fileURLWithPath: outputFile).deletingLastPathComponent(),
+                    generatedAt: generatedAt)
+                let metadata = try savePrefilter(
+                    filter: filter,
+                    to: outputFile,
+                    version: version,
+                    generatedAt: generatedAt)
+                prefilterSnapshots[usecase.name] = .init(
+                    usecase: usecase.name,
+                    generatedAt: generatedAt,
+                    sourceURLCount: urls.count,
+                    sourceFile: sourceFile,
+                    outputFile: outputFile,
+                    version: metadata.version,
+                    size: metadata.size,
+                    sha256: metadata.sha256)
+                let datName = (outputFile as NSString).deletingPathExtension + ".dat"
+                logger.info("""
+                    Generated URL prefilters with \(urls.count) URLs from \(sourceFile), \
+                    saved Bloom metadata to \(outputFile), filter bytes to \(datName), version \(version)
+                    """)
+            } else {
+                logger.warning("Skipped Bloom filter generation because no URLs were found in \(sourceFile)")
             }
         }
 
-        await prefilterStore.set(latestPrefilterSnapshot)
+        await prefilterStore.setAll(prefilterSnapshots)
     }
 
     private func loadPrefilterURLs(from filePath: String) throws -> [String] {
@@ -217,9 +218,9 @@ actor ReloadService: Service {
         to filePath: String,
         version: String,
         generatedAt: Date
-    ) throws {
+    ) throws -> BloomFilterSplitMetadata {
         let outputURL = URL(fileURLWithPath: filePath)
-        try filter.writeSplit(to: outputURL, version: version, generatedAt: generatedAt)
+        return try filter.writeSplit(to: outputURL, version: version, generatedAt: generatedAt)
     }
 
     private func nextPrefilterVersion(in directoryURL: URL, generatedAt: Date) throws -> String {
@@ -240,7 +241,19 @@ actor ReloadService: Service {
         var todayCount = 0
         var maxTodaySequence: Int?
         let decoder = JSONDecoder()
-        decoder.dateDecodingStrategy = .iso8601
+        decoder.dateDecodingStrategy = .custom { [self] dec in
+            let container = try dec.singleValueContainer()
+            let value = try container.decode(String.self)
+            if let date = self.seoulDateFormatter().date(from: value) {
+                return date
+            }
+            if let date = ISO8601DateFormatter().date(from: value) {
+                return date
+            }
+            throw DecodingError.dataCorruptedError(
+                in: container,
+                debugDescription: "Invalid date format for generatedAt: \(value)")
+        }
 
         for fileURL in jsonFiles where fileURL.pathExtension == "json" && fileURL.lastPathComponent.hasSuffix("-prefilter.json") {
             guard let data = try? Data(contentsOf: fileURL) else { continue }
@@ -273,5 +286,14 @@ actor ReloadService: Service {
         formatter.timeZone = .current
         formatter.dateFormat = "yyyy-MM-dd"
         return formatter.string(from: date)
+    }
+
+    private func seoulDateFormatter() -> DateFormatter {
+        let formatter = DateFormatter()
+        formatter.calendar = Calendar(identifier: .gregorian)
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = TimeZone(identifier: "Asia/Seoul")
+        formatter.dateFormat = "yyyy-MM-dd'T'HH:mm:ss"
+        return formatter
     }
 }

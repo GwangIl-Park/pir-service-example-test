@@ -352,7 +352,11 @@ public final class BloomFilter: @unchecked Sendable, CustomStringConvertible, Co
     }
 
     /// 메타데이터만 담은 JSON과, 비트 배열을 담은 `.dat` 파일로 분리 저장한다.
-    public func writeSplit(to jsonURL: URL, version: String, generatedAt: Date = .now) throws {
+    public func writeSplit(
+        to jsonURL: URL,
+        version: String,
+        generatedAt: Date = .now
+    ) throws -> BloomFilterSplitMetadata {
         let directoryURL = jsonURL.deletingLastPathComponent()
         try FileManager.default.createDirectory(at: directoryURL, withIntermediateDirectories: true)
         let datFileName = jsonURL.deletingPathExtension().appendingPathExtension("dat").lastPathComponent
@@ -363,47 +367,48 @@ public final class BloomFilter: @unchecked Sendable, CustomStringConvertible, Co
             murmurSeed: getMurmurSeed(),
             bitCount: UInt32(getNumberOfBits()),
             hashCount: UInt32(getNumberOfHashes()),
-            dataFile: datFileName,
             version: version,
             size: rawData.count,
             sha256: digestHex,
             generatedAt: generatedAt)
-        var encoder = JSONEncoder()
+        let encoder = JSONEncoder()
         encoder.outputFormatting = [.sortedKeys]
-        encoder.dateEncodingStrategy = .iso8601
+        encoder.dateEncodingStrategy = .custom { date, enc in
+            var container = enc.singleValueContainer()
+            try container.encode(Self.seoulDateFormatter().string(from: date))
+        }
         let jsonData = try encoder.encode(metadata)
         try jsonData.write(to: jsonURL, options: .atomic)
         try rawData.write(to: datURL, options: .atomic)
+        return metadata
     }
 
-    /// JSON 단일 파일(레거시, `data` 포함) 또는 메타데이터 JSON + `dataFile`이 가리키는 `.dat`를 읽는다.
+    /// 메타데이터 JSON + 같은 stem의 `.dat`를 읽는다.
     public static func load(fromJSONAt jsonURL: URL) throws -> BloomFilter {
         let jsonData = try Data(contentsOf: jsonURL)
-        var decoder = JSONDecoder()
-        if let legacy = try? decoder.decode(BloomFilter.self, from: jsonData) {
-            return legacy
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .custom { dec in
+            let container = try dec.singleValueContainer()
+            let value = try container.decode(String.self)
+            if let date = Self.seoulDateFormatter().date(from: value) {
+                return date
+            }
+            if let date = ISO8601DateFormatter().date(from: value) {
+                return date
+            }
+            throw DecodingError.dataCorruptedError(
+                in: container,
+                debugDescription: "Invalid date format for generatedAt: \(value)")
         }
-        decoder.dateDecodingStrategy = .iso8601
-        if let split = try? decoder.decode(BloomFilterSplitMetadata.self, from: jsonData) {
-            return try loadSplitMetadata(split, relativeToJSON: jsonURL)
-        }
-        let legacySplit = try decoder.decode(BloomFilterSplitMetadataLegacy.self, from: jsonData)
-        let datURL = jsonURL.deletingLastPathComponent().appendingPathComponent(legacySplit.dataFile)
-        let bitData = try Data(contentsOf: datURL)
-        return BloomFilter(
-            data: bitData,
-            falsePositiveTolerance: legacySplit.falsePositiveTolerance,
-            numberOfItems: legacySplit.itemCount,
-            numberOfBits: Int(legacySplit.bitCount),
-            numberOfHashes: Int(legacySplit.hashCount),
-            murmurSeed: legacySplit.murmurSeed)
+        let split = try decoder.decode(BloomFilterSplitMetadata.self, from: jsonData)
+        return try loadSplitMetadata(split, relativeToJSON: jsonURL)
     }
 
     private static func loadSplitMetadata(
         _ split: BloomFilterSplitMetadata,
         relativeToJSON jsonURL: URL
     ) throws -> BloomFilter {
-        let datURL = jsonURL.deletingLastPathComponent().appendingPathComponent(split.dataFile)
+        let datURL = jsonURL.deletingPathExtension().appendingPathExtension("dat")
         let bitData = try Data(contentsOf: datURL)
         if split.size != bitData.count {
             throw BloomFilterLoadError.sizeMismatch(expected: split.size, actual: bitData.count)
@@ -425,30 +430,28 @@ public final class BloomFilter: @unchecked Sendable, CustomStringConvertible, Co
     private static func hexDigest<D: Digest>(_ digest: D) -> String {
         digest.map { String(format: "%02x", $0) }.joined()
     }
+
+    private static func seoulDateFormatter() -> DateFormatter {
+        let formatter = DateFormatter()
+        formatter.calendar = Calendar(identifier: .gregorian)
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = TimeZone(identifier: "Asia/Seoul")
+        formatter.dateFormat = "yyyy-MM-dd'T'HH:mm:ss"
+        return formatter
+    }
 }
 
-/// `data` 필드 대신 `dataFile`로 비트 배열 경로를 가리키는 prefilter JSON 형식.
+/// `data` 필드 대신 같은 stem의 `.dat` 파일을 사용한다.
 public struct BloomFilterSplitMetadata: Codable {
     public let murmurSeed: UInt32
     public let bitCount: UInt32
     public let hashCount: UInt32
-    public let dataFile: String
     public let version: String?
     /// `.dat` 파일의 바이트 길이.
     public let size: Int
     /// `.dat` 내용의 SHA-256 (소문자 16진 문자열).
     public let sha256: String
     public let generatedAt: Date
-}
-
-private struct BloomFilterSplitMetadataLegacy: Codable {
-    let itemCount: Int
-    let falsePositiveTolerance: Double
-    let murmurSeed: UInt32
-    let bitCount: UInt32
-    let byteCount: Int
-    let hashCount: UInt32
-    let dataFile: String
 }
 
 public enum BloomFilterLoadError: Error {
