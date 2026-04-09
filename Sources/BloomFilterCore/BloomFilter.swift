@@ -1,3 +1,4 @@
+import Crypto
 import Foundation
 
 /// A Bloom filter implementation using FNV-1a and MurmurHash3 with double hashing
@@ -351,51 +352,106 @@ public final class BloomFilter: @unchecked Sendable, CustomStringConvertible, Co
     }
 
     /// 메타데이터만 담은 JSON과, 비트 배열을 담은 `.dat` 파일로 분리 저장한다.
-    public func writeSplit(to jsonURL: URL) throws {
+    public func writeSplit(to jsonURL: URL, version: String, generatedAt: Date = .now) throws {
         let directoryURL = jsonURL.deletingLastPathComponent()
         try FileManager.default.createDirectory(at: directoryURL, withIntermediateDirectories: true)
         let datFileName = jsonURL.deletingPathExtension().appendingPathExtension("dat").lastPathComponent
         let datURL = directoryURL.appendingPathComponent(datFileName)
+        let rawData = getData()
+        let digestHex = Self.hexDigest(SHA256.hash(data: rawData))
         let metadata = BloomFilterSplitMetadata(
-            itemCount: getNumberOfItems(),
-            falsePositiveTolerance: getFalsePositiveTolerance(),
             murmurSeed: getMurmurSeed(),
             bitCount: UInt32(getNumberOfBits()),
-            byteCount: (getNumberOfBits() + 7) / 8,
             hashCount: UInt32(getNumberOfHashes()),
-            dataFile: datFileName)
-        let jsonData = try JSONEncoder().encode(metadata)
+            dataFile: datFileName,
+            version: version,
+            size: rawData.count,
+            sha256: digestHex,
+            generatedAt: generatedAt)
+        var encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys]
+        encoder.dateEncodingStrategy = .iso8601
+        let jsonData = try encoder.encode(metadata)
         try jsonData.write(to: jsonURL, options: .atomic)
-        try getData().write(to: datURL, options: .atomic)
+        try rawData.write(to: datURL, options: .atomic)
     }
 
     /// JSON 단일 파일(레거시, `data` 포함) 또는 메타데이터 JSON + `dataFile`이 가리키는 `.dat`를 읽는다.
     public static func load(fromJSONAt jsonURL: URL) throws -> BloomFilter {
         let jsonData = try Data(contentsOf: jsonURL)
-        let decoder = JSONDecoder()
+        var decoder = JSONDecoder()
         if let legacy = try? decoder.decode(BloomFilter.self, from: jsonData) {
             return legacy
         }
-        let split = try decoder.decode(BloomFilterSplitMetadata.self, from: jsonData)
-        let datURL = jsonURL.deletingLastPathComponent().appendingPathComponent(split.dataFile)
+        decoder.dateDecodingStrategy = .iso8601
+        if let split = try? decoder.decode(BloomFilterSplitMetadata.self, from: jsonData) {
+            return try loadSplitMetadata(split, relativeToJSON: jsonURL)
+        }
+        let legacySplit = try decoder.decode(BloomFilterSplitMetadataLegacy.self, from: jsonData)
+        let datURL = jsonURL.deletingLastPathComponent().appendingPathComponent(legacySplit.dataFile)
         let bitData = try Data(contentsOf: datURL)
         return BloomFilter(
             data: bitData,
-            falsePositiveTolerance: split.falsePositiveTolerance,
-            numberOfItems: split.itemCount,
+            falsePositiveTolerance: legacySplit.falsePositiveTolerance,
+            numberOfItems: legacySplit.itemCount,
+            numberOfBits: Int(legacySplit.bitCount),
+            numberOfHashes: Int(legacySplit.hashCount),
+            murmurSeed: legacySplit.murmurSeed)
+    }
+
+    private static func loadSplitMetadata(
+        _ split: BloomFilterSplitMetadata,
+        relativeToJSON jsonURL: URL
+    ) throws -> BloomFilter {
+        let datURL = jsonURL.deletingLastPathComponent().appendingPathComponent(split.dataFile)
+        let bitData = try Data(contentsOf: datURL)
+        if split.size != bitData.count {
+            throw BloomFilterLoadError.sizeMismatch(expected: split.size, actual: bitData.count)
+        }
+        let digestHex = hexDigest(SHA256.hash(data: bitData))
+        guard digestHex.caseInsensitiveCompare(split.sha256) == .orderedSame else {
+            throw BloomFilterLoadError.sha256Mismatch
+        }
+        // 메타데이터에서 제거된 필드는 조회 알고리즘에 쓰이지 않아 보존용 기본값을 사용한다.
+        return BloomFilter(
+            data: bitData,
+            falsePositiveTolerance: 0.001,
+            numberOfItems: 0,
             numberOfBits: Int(split.bitCount),
             numberOfHashes: Int(split.hashCount),
             murmurSeed: split.murmurSeed)
+    }
+
+    private static func hexDigest<D: Digest>(_ digest: D) -> String {
+        digest.map { String(format: "%02x", $0) }.joined()
     }
 }
 
 /// `data` 필드 대신 `dataFile`로 비트 배열 경로를 가리키는 prefilter JSON 형식.
 public struct BloomFilterSplitMetadata: Codable {
-    public let itemCount: Int
-    public let falsePositiveTolerance: Double
     public let murmurSeed: UInt32
     public let bitCount: UInt32
-    public let byteCount: Int
     public let hashCount: UInt32
     public let dataFile: String
+    public let version: String?
+    /// `.dat` 파일의 바이트 길이.
+    public let size: Int
+    /// `.dat` 내용의 SHA-256 (소문자 16진 문자열).
+    public let sha256: String
+    public let generatedAt: Date
+}
+
+private struct BloomFilterSplitMetadataLegacy: Codable {
+    let itemCount: Int
+    let falsePositiveTolerance: Double
+    let murmurSeed: UInt32
+    let bitCount: UInt32
+    let byteCount: Int
+    let hashCount: UInt32
+    let dataFile: String
+}
+
+public enum BloomFilterLoadError: Error {
+    case sizeMismatch(expected: Int, actual: Int)
+    case sha256Mismatch
 }

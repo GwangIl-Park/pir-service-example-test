@@ -154,17 +154,25 @@ actor ReloadService: Service {
                 let urls = try loadPrefilterURLs(from: sourceFile)
                 if !urls.isEmpty {
                     let filter = BloomFilter(items: urls)
-                    try savePrefilter(filter: filter, to: outputFile)
+                    let generatedAt = Date()
+                    let version = try nextPrefilterVersion(
+                        in: URL(fileURLWithPath: outputFile).deletingLastPathComponent(),
+                        generatedAt: generatedAt)
+                    try savePrefilter(
+                        filter: filter,
+                        to: outputFile,
+                        version: version,
+                        generatedAt: generatedAt)
                     latestPrefilterSnapshot = .init(
                         filter: filter,
-                        generatedAt: Date(),
+                        generatedAt: generatedAt,
                         sourceURLCount: urls.count,
                         sourceFile: sourceFile,
                         outputFile: outputFile)
                     let datName = (outputFile as NSString).deletingPathExtension + ".dat"
                     logger.info("""
                         Generated URL prefilters with \(urls.count) URLs from \(sourceFile), \
-                        saved Bloom metadata to \(outputFile) and filter bytes to \(datName)
+                        saved Bloom metadata to \(outputFile), filter bytes to \(datName), version \(version)
                         """)
                 } else {
                     logger.warning("Skipped Bloom filter generation because no URLs were found in \(sourceFile)")
@@ -204,8 +212,66 @@ actor ReloadService: Service {
         return urls
     }
 
-    private func savePrefilter(filter: BloomFilter, to filePath: String) throws {
+    private func savePrefilter(
+        filter: BloomFilter,
+        to filePath: String,
+        version: String,
+        generatedAt: Date
+    ) throws {
         let outputURL = URL(fileURLWithPath: filePath)
-        try filter.writeSplit(to: outputURL)
+        try filter.writeSplit(to: outputURL, version: version, generatedAt: generatedAt)
+    }
+
+    private func nextPrefilterVersion(in directoryURL: URL, generatedAt: Date) throws -> String {
+        let calendar = Calendar(identifier: .gregorian)
+        let startOfDay = calendar.startOfDay(for: generatedAt)
+        guard
+            let nextDay = calendar.date(byAdding: .day, value: 1, to: startOfDay)
+        else {
+            return "bf-\(dayString(from: generatedAt))-1"
+        }
+
+        let versionPrefix = "bf-\(dayString(from: generatedAt))-"
+        let jsonFiles = try FileManager.default.contentsOfDirectory(
+            at: directoryURL,
+            includingPropertiesForKeys: nil,
+            options: [.skipsHiddenFiles]
+        )
+        var todayCount = 0
+        var maxTodaySequence: Int?
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+
+        for fileURL in jsonFiles where fileURL.pathExtension == "json" && fileURL.lastPathComponent.hasSuffix("-prefilter.json") {
+            guard let data = try? Data(contentsOf: fileURL) else { continue }
+            guard let metadata = try? decoder.decode(BloomFilterSplitMetadata.self, from: data) else { continue }
+            let createdAt = metadata.generatedAt
+            guard createdAt >= startOfDay && createdAt < nextDay else { continue }
+            todayCount += 1
+            if
+                let version = metadata.version,
+                version.hasPrefix(versionPrefix),
+                let sequence = Int(version.dropFirst(versionPrefix.count))
+            {
+                maxTodaySequence = max(maxTodaySequence ?? 0, sequence)
+            }
+        }
+        if let last = maxTodaySequence {
+            return "\(versionPrefix)\(last + 1)"
+        }
+        if todayCount > 0 {
+            // 기존 같은 날짜 파일은 있으나 version 필드가 없던 이전 포맷이면 개수 기준으로 이어간다.
+            return "\(versionPrefix)\(todayCount + 1)"
+        }
+        return "\(versionPrefix)1"
+    }
+
+    private func dayString(from date: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.calendar = Calendar(identifier: .gregorian)
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = .current
+        formatter.dateFormat = "yyyy-MM-dd"
+        return formatter.string(from: date)
     }
 }

@@ -43,7 +43,12 @@ let package = Package(
         .package(url: "https://github.com/swiftlang/swift-docc-plugin", from: "1.0.0"),
     ],
     targets: [
-        .target(name: "BloomFilterCore", swiftSettings: swiftSettings),
+        .target(
+            name: "BloomFilterCore",
+            dependencies: [
+                .product(name: "Crypto", package: "swift-crypto"),
+            ],
+            swiftSettings: swiftSettings),
         .executableTarget(
             name: "PIRService",
             dependencies: [
