@@ -161,9 +161,10 @@ actor ReloadService: Service {
                         sourceURLCount: urls.count,
                         sourceFile: sourceFile,
                         outputFile: outputFile)
+                    let datName = (outputFile as NSString).deletingPathExtension + ".dat"
                     logger.info("""
                         Generated URL prefilters with \(urls.count) URLs from \(sourceFile), \
-                        saved Bloom to \(outputFile)
+                        saved Bloom metadata to \(outputFile) and filter bytes to \(datName)
                         """)
                 } else {
                     logger.warning("Skipped Bloom filter generation because no URLs were found in \(sourceFile)")
@@ -205,9 +206,6 @@ actor ReloadService: Service {
 
     private func savePrefilter(filter: BloomFilter, to filePath: String) throws {
         let outputURL = URL(fileURLWithPath: filePath)
-        let directoryURL = outputURL.deletingLastPathComponent()
-        try FileManager.default.createDirectory(at: directoryURL, withIntermediateDirectories: true)
-        let data = try JSONEncoder().encode(filter)
-        try data.write(to: outputURL, options: .atomic)
+        try filter.writeSplit(to: outputURL)
     }
 }

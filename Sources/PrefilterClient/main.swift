@@ -15,8 +15,7 @@ struct PrefilterClient: AsyncParsableCommand {
 
     func run() async throws {
         let prefilterURL = URL(fileURLWithPath: prefilterFile)
-        let data = try Data(contentsOf: prefilterURL)
-        let filter = try JSONDecoder().decode(BloomFilter.self, from: data)
+        let filter = try BloomFilter.load(fromJSONAt: prefilterURL)
         let contains = filter.contains(keyword)
 
         if contains {

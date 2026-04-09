@@ -349,4 +349,53 @@ public final class BloomFilter: @unchecked Sendable, CustomStringConvertible, Co
 
         return result
     }
+
+    /// 메타데이터만 담은 JSON과, 비트 배열을 담은 `.dat` 파일로 분리 저장한다.
+    public func writeSplit(to jsonURL: URL) throws {
+        let directoryURL = jsonURL.deletingLastPathComponent()
+        try FileManager.default.createDirectory(at: directoryURL, withIntermediateDirectories: true)
+        let datFileName = jsonURL.deletingPathExtension().appendingPathExtension("dat").lastPathComponent
+        let datURL = directoryURL.appendingPathComponent(datFileName)
+        let metadata = BloomFilterSplitMetadata(
+            itemCount: getNumberOfItems(),
+            falsePositiveTolerance: getFalsePositiveTolerance(),
+            murmurSeed: getMurmurSeed(),
+            bitCount: UInt32(getNumberOfBits()),
+            byteCount: (getNumberOfBits() + 7) / 8,
+            hashCount: UInt32(getNumberOfHashes()),
+            dataFile: datFileName)
+        let jsonData = try JSONEncoder().encode(metadata)
+        try jsonData.write(to: jsonURL, options: .atomic)
+        try getData().write(to: datURL, options: .atomic)
+    }
+
+    /// JSON 단일 파일(레거시, `data` 포함) 또는 메타데이터 JSON + `dataFile`이 가리키는 `.dat`를 읽는다.
+    public static func load(fromJSONAt jsonURL: URL) throws -> BloomFilter {
+        let jsonData = try Data(contentsOf: jsonURL)
+        let decoder = JSONDecoder()
+        if let legacy = try? decoder.decode(BloomFilter.self, from: jsonData) {
+            return legacy
+        }
+        let split = try decoder.decode(BloomFilterSplitMetadata.self, from: jsonData)
+        let datURL = jsonURL.deletingLastPathComponent().appendingPathComponent(split.dataFile)
+        let bitData = try Data(contentsOf: datURL)
+        return BloomFilter(
+            data: bitData,
+            falsePositiveTolerance: split.falsePositiveTolerance,
+            numberOfItems: split.itemCount,
+            numberOfBits: Int(split.bitCount),
+            numberOfHashes: Int(split.hashCount),
+            murmurSeed: split.murmurSeed)
+    }
+}
+
+/// `data` 필드 대신 `dataFile`로 비트 배열 경로를 가리키는 prefilter JSON 형식.
+public struct BloomFilterSplitMetadata: Codable {
+    public let itemCount: Int
+    public let falsePositiveTolerance: Double
+    public let murmurSeed: UInt32
+    public let bitCount: UInt32
+    public let byteCount: Int
+    public let hashCount: UInt32
+    public let dataFile: String
 }
