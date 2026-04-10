@@ -77,8 +77,15 @@ struct FileLogHandler: LogHandler {
 }
 
 enum LoggingBootstrap {
-    /// Installs a logging backend that mirrors stderr **and** appends to `logFileURL`.
-    /// Must run before any ``Logger`` is created (once per process).
+    /// stderr만 사용 (파일 없음). 프로세스당 한 번만 호출 가능.
+    static func bootstrapStderrOnly() {
+        LoggingSystem.bootstrap { label in
+            StreamLogHandler.standardError(label: label)
+        }
+    }
+
+    /// stderr와 동일한 내용을 `logFileURL`에도 append한다.
+    /// 프로세스당 한 번만 호출 가능.
     static func bootstrapStderrAndFile(logFileURL: URL) throws {
         let sink = try FileLogSink(url: logFileURL)
         LoggingSystem.bootstrap { label in
