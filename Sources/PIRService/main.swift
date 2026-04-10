@@ -63,7 +63,10 @@ struct ServerCommand: AsyncParsableCommand {
             host: hostname,
             port: tcpPort,
             configFile: URL(fileURLWithPath: serviceConfigFile),
-            logger: app.logger)
+            logger: app.logger,
+            performReloadConfiguration: {
+                try await reloadService.reloadConfiguration()
+            })
 
         try await reloadService.reloadConfiguration()
 

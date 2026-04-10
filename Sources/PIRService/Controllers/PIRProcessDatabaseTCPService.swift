@@ -9,6 +9,7 @@ struct PIRProcessDatabaseTCPService: Service {
     let port: Int
     let configFile: URL
     let logger: Logger
+    let performReloadConfiguration: @Sendable () async throws -> Void
 
     func run() async throws {
         let group = MultiThreadedEventLoopGroup(numberOfThreads: System.coreCount)
@@ -18,7 +19,11 @@ struct PIRProcessDatabaseTCPService: Service {
             .serverChannelOption(ChannelOptions.backlog, value: 256)
             // 연결마다 핸들러 추가
             .childChannelInitializer { channel in
-                channel.pipeline.addHandler(PIRProcessDatabaseTCPHandler(configFile: self.configFile, logger: self.logger))
+                channel.pipeline.addHandler(
+                    PIRProcessDatabaseTCPHandler(
+                        configFile: self.configFile,
+                        logger: self.logger,
+                        performReloadConfiguration: self.performReloadConfiguration))
             }
             // 자식 채널 옵션
             .childChannelOption(ChannelOptions.maxMessagesPerRead, value: 16)

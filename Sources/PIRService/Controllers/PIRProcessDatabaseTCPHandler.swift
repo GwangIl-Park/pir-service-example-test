@@ -1,11 +1,6 @@
 import Foundation
-import NIO
 import Logging
-#if canImport(Darwin)
-import Darwin
-#elseif canImport(Glibc)
-import Glibc
-#endif
+import NIO
 
 /// TCP 기반으로 PIR 데이터베이스 처리 요청을 받기 위한 핸들러의 골격입니다.
 /// 현재는 HTTP 컨트롤러(`PIRProcessDatabaseController`)와 동일한 내부 처리기
@@ -13,7 +8,7 @@ import Glibc
 ///
 /// - 텍스트 프로토콜:
 ///   - `PROCESS`: 미리 지정된 설정 파일로 DB 처리
-///   - `RELOAD`: SIGHUP을 발생시켜 ReloadService 트리거
+///   - `RELOAD`: `ReloadService.reloadConfiguration()` 직접 호출 (Linux에서 `raise(SIGHUP)`가 시그널 스트림에 잡히지 않는 경우가 있음)
 ///   - 성공 시: `"OK\n"`, 실패 시: `"ERROR: ...\n"`
 final class PIRProcessDatabaseTCPHandler: ChannelInboundHandler, @unchecked Sendable {
     typealias InboundIn = ByteBuffer
@@ -21,10 +16,16 @@ final class PIRProcessDatabaseTCPHandler: ChannelInboundHandler, @unchecked Send
 
     private let configFile: URL
     let logger: Logger
+    private let performReloadConfiguration: @Sendable () async throws -> Void
 
-    init(configFile: URL, logger: Logger) {
+    init(
+        configFile: URL,
+        logger: Logger,
+        performReloadConfiguration: @escaping @Sendable () async throws -> Void
+    ) {
         self.configFile = configFile
         self.logger = logger
+        self.performReloadConfiguration = performReloadConfiguration
     }
 
     func channelRead(context: ChannelHandlerContext, data: NIOAny) {
@@ -71,13 +72,9 @@ final class PIRProcessDatabaseTCPHandler: ChannelInboundHandler, @unchecked Send
                         relativePathBaseDirectory: resourceRoot.path)
                 }
             } else if received == "RELOAD" {
-                self.logger.info("PIRProcessDatabaseTCPHandler RELOAD: raising SIGHUP")
-                let result = raise(SIGHUP)
-                if result != 0 {
-                    let code = Int(errno)
-                    throw PIRProcessDatabaseTCPError.reloadFailed(code)
-                }
-                self.logger.info("PIRProcessDatabaseTCPHandler RELOAD: raise(SIGHUP) returned 0")
+                self.logger.info("PIRProcessDatabaseTCPHandler RELOAD: calling reloadConfiguration()")
+                try await self.performReloadConfiguration()
+                self.logger.info("PIRProcessDatabaseTCPHandler RELOAD: reloadConfiguration() finished")
             } else {
                 throw PIRProcessDatabaseTCPError.invalidCommand
             }
@@ -100,6 +97,5 @@ final class PIRProcessDatabaseTCPHandler: ChannelInboundHandler, @unchecked Send
 
 enum PIRProcessDatabaseTCPError: Error {
     case invalidCommand
-    case reloadFailed(Int)
 }
 
