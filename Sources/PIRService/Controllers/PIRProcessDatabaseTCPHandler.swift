@@ -41,9 +41,11 @@ final class PIRProcessDatabaseTCPHandler: ChannelInboundHandler, @unchecked Send
             "payload": "\(received)"
         ])
 
+        let loop = context.eventLoop
         let channel = context.channel
         let allocator = channel.allocator
-        context.eventLoop.makeFutureWithTask {
+        loop.makeFutureWithTask {
+            self.logger.info("PIRProcessDatabaseTCPHandler task started", metadata: ["payload": "\(received)"])
             if received == "PROCESS" {
                 // 서비스 설정의 `dataPath`(없으면 `<서비스설정>/data`)를 루트로,
                 // `{resourceRoot}/{fileStem}-config.json` + JSON 내 상대 경로 입·출력도 같은 루트에 맞춘다.
@@ -69,22 +71,28 @@ final class PIRProcessDatabaseTCPHandler: ChannelInboundHandler, @unchecked Send
                         relativePathBaseDirectory: resourceRoot.path)
                 }
             } else if received == "RELOAD" {
+                self.logger.info("PIRProcessDatabaseTCPHandler RELOAD: raising SIGHUP")
                 let result = raise(SIGHUP)
                 if result != 0 {
                     let code = Int(errno)
                     throw PIRProcessDatabaseTCPError.reloadFailed(code)
                 }
+                self.logger.info("PIRProcessDatabaseTCPHandler RELOAD: raise(SIGHUP) returned 0")
             } else {
                 throw PIRProcessDatabaseTCPError.invalidCommand
             }
         }.whenComplete { result in
-            switch result {
-            case .success:
-                let okBuffer = allocator.buffer(string: "OK\n")
-                channel.writeAndFlush(self.wrapOutboundOut(okBuffer), promise: nil)
-            case .failure(let error):
-                let errorBuffer = allocator.buffer(string: "ERROR: \(error.localizedDescription)\n")
-                channel.writeAndFlush(self.wrapOutboundOut(errorBuffer), promise: nil)
+            // Linux 등에서 완료 콜백이 채널 이벤트 루프가 아닌 스레드에서 호출될 수 있어,
+            // writeAndFlush는 반드시 loop에서 실행한다.
+            loop.execute {
+                switch result {
+                case .success:
+                    let okBuffer = allocator.buffer(string: "OK\n")
+                    channel.writeAndFlush(okBuffer, promise: nil)
+                case .failure(let error):
+                    let errorBuffer = allocator.buffer(string: "ERROR: \(error.localizedDescription)\n")
+                    channel.writeAndFlush(errorBuffer, promise: nil)
+                }
             }
         }
     }
