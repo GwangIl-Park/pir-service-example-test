@@ -58,9 +58,16 @@ struct AppContext: IdentifiedRequestContext, AuthenticatedRequestContext, Platfo
 func loadUsecase(
     usecase: ServerConfiguration.Usecase,
     processDatabaseConfigPath: String?,
+    dataDirectory: String? = nil,
     logger: Logger? = nil
 ) async throws -> Usecase {
-    let baseParamsPath = "\(usecase.fileStem)-0.params.txtpb"
+    let baseParamsPath: String
+    if let dir = dataDirectory {
+        baseParamsPath = URL(fileURLWithPath: dir, isDirectory: true)
+            .appendingPathComponent("\(usecase.fileStem)-0.params.txtpb").path
+    } else {
+        baseParamsPath = "\(usecase.fileStem)-0.params.txtpb"
+    }
     if !FileManager.default.fileExists(atPath: baseParamsPath) {
         guard let processDatabaseConfigPath else {
             throw PirUsecaseLoadError.missingParametersFile(baseParamsPath)
@@ -68,15 +75,23 @@ func loadUsecase(
         let log = logger ?? Logger(label: "PIRService.loadUsecase")
         log.info(
             "Missing PIR parameters at \(baseParamsPath); running InternalPIRProcessDatabase with \(processDatabaseConfigPath)")
+        let pathResolutionBase: String
+        if let dir = dataDirectory {
+            pathResolutionBase = URL(fileURLWithPath: dir, isDirectory: true).standardizedFileURL.path
+        } else {
+            pathResolutionBase = URL(fileURLWithPath: processDatabaseConfigPath).deletingLastPathComponent()
+                .standardizedFileURL.path
+        }
         try await InternalPIRProcessDatabase.run(
             configFilePath: processDatabaseConfigPath,
             outputFileStem: usecase.fileStem,
-            parallel: true)
+            parallel: true,
+            relativePathBaseDirectory: pathResolutionBase)
     }
     do {
-        return try PirUsecase<MulPirServer<Bfv<UInt32>>>(usecase: usecase)
+        return try PirUsecase<MulPirServer<Bfv<UInt32>>>(usecase: usecase, dataDirectory: dataDirectory)
     } catch {
-        return try PirUsecase<MulPirServer<Bfv<UInt64>>>(usecase: usecase)
+        return try PirUsecase<MulPirServer<Bfv<UInt64>>>(usecase: usecase, dataDirectory: dataDirectory)
     }
 }
 

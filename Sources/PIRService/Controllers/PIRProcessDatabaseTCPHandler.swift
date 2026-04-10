@@ -45,24 +45,28 @@ final class PIRProcessDatabaseTCPHandler: ChannelInboundHandler, @unchecked Send
         let allocator = channel.allocator
         context.eventLoop.makeFutureWithTask {
             if received == "PROCESS" {
-                // `configFile` here is the *service* config; derive each usecase config as:
-                //   <service-config-dir>/{usecase.fileStem}-config.json
+                // 서비스 설정의 `dataPath`(없으면 `<서비스설정>/data`)를 루트로,
+                // `{resourceRoot}/{fileStem}-config.json` + JSON 내 상대 경로 입·출력도 같은 루트에 맞춘다.
                 let configData = try Data(contentsOf: self.configFile)
                 let config = try JSONDecoder().decode(ServerConfiguration.self, from: configData)
-                let dirURL = self.configFile.deletingLastPathComponent()
+
+                let resourceRoot = config.resolvedDataRootURL(relativeTo: self.configFile)
+                    ?? config.defaultProcessConfigDataDirectoryURL(relativeTo: self.configFile)
 
                 for usecase in config.usecases {
-                    let derivedConfigURL = dirURL.appendingPathComponent("data/\(usecase.fileStem)-config.json")
+                    let derivedConfigURL = resourceRoot.appendingPathComponent("\(usecase.fileStem)-config.json")
                     self.logger.info(
                         "TCP PROCESS: running InternalPIRProcessDatabase",
                         metadata: [
                             "usecase": .string(usecase.name),
                             "configFilePath": .string(derivedConfigURL.path),
+                            "resourceRoot": .string(resourceRoot.path),
                         ])
                     try await InternalPIRProcessDatabase.run(
                         configFilePath: derivedConfigURL.path,
                         outputFileStem: usecase.fileStem,
-                        parallel: true)
+                        parallel: true,
+                        relativePathBaseDirectory: resourceRoot.path)
                 }
             } else if received == "RELOAD" {
                 let result = raise(SIGHUP)

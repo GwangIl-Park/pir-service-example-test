@@ -66,8 +66,16 @@ struct PirUsecase<PirScheme: IndexPirServer>: Usecase {
         self.symmetricPirConfig = symmetricPirConfig
     }
 
-    init(usecase: ServerConfiguration.Usecase) throws {
-        let parameterPath = "\(usecase.fileStem)-0.params.txtpb"
+    /// - Parameter dataDirectory: `nil`이면 현재 작업 디렉터리 기준 파일명만 사용. 지정 시 그 디렉터리 아래의 params/bin을 읽는다.
+    init(usecase: ServerConfiguration.Usecase, dataDirectory: String? = nil) throws {
+        func pathJoin(_ fileName: String) -> String {
+            guard let dir = dataDirectory, !dir.isEmpty else {
+                return fileName
+            }
+            return URL(fileURLWithPath: dir, isDirectory: true).appendingPathComponent(fileName).path
+        }
+
+        let parameterPath = pathJoin("\(usecase.fileStem)-0.params.txtpb")
         let params = try Apple_SwiftHomomorphicEncryption_Pir_V1_PirParameters(from: parameterPath)
         let encryptionParams: EncryptionParameters<Scheme> = try params.encryptionParameters.native()
         let context: Context<Scheme> = try Context(encryptionParameters: encryptionParams)
@@ -75,8 +83,8 @@ struct PirUsecase<PirScheme: IndexPirServer>: Usecase {
         self.keywordParams = try params.keywordPirParams.nativeWithSymmetricPirClientConfig()
         self.symmetricPirConfig = try usecase.symmetricPirArguments?.resolve()
         self.shards = try (0..<usecase.shardCount).map { shardIndex in
-            let parameterPath = "\(usecase.fileStem)-\(shardIndex).params.txtpb"
-            let databasePath = "\(usecase.fileStem)-\(shardIndex).bin"
+            let parameterPath = pathJoin("\(usecase.fileStem)-\(shardIndex).params.txtpb")
+            let databasePath = pathJoin("\(usecase.fileStem)-\(shardIndex).bin")
             let pirParams = try Apple_SwiftHomomorphicEncryption_Pir_V1_PirParameters(from: parameterPath)
             let encryptionParams: EncryptionParameters<Scheme> = try pirParams.encryptionParameters.native()
             guard encryptionParams == context.encryptionParameters else {

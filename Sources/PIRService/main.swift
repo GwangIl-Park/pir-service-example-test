@@ -29,8 +29,8 @@ struct ServerCommand: AsyncParsableCommand {
     @Option(
         name: .customLong("log-file"),
         help: """
-        로그를 append할 파일 경로 (stderr에도 동일 출력). 기본: logs/pir-service.log. \
-        '-' 를 주면 stderr만 씁니다.
+        로그를 append할 파일 경로 (부모 디렉터리·파일이 없으면 생성, stderr에도 동일 출력). \
+        기본: logs/pir-service.log. '-' 를 주면 stderr만 씁니다.
         """)
     var logFile: String = "logs/pir-service.log"
     @Option(name: .customLong("service-config-file")) var serviceConfigFile: String

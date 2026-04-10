@@ -231,20 +231,78 @@ enum InternalPIRProcessDatabase {
 
     private static let logger = Logger(label: "PIRProcessDatabase")
 
+    /// JSON에 적힌 상대 경로를 **설정 파일이 있는 디렉터리** 기준 절대 경로로 바꾼다 (`dataPath` 사용 시 그 트리와 일치).
+    private static func resolveRelativePath(_ path: String, relativeTo baseDirectory: URL) -> String {
+        let trimmed = path.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return path }
+        if (trimmed as NSString).isAbsolutePath {
+            return trimmed
+        }
+        return baseDirectory.standardizedFileURL
+            .appendingPathComponent(trimmed)
+            .standardizedFileURL
+            .path
+    }
+
+    private static func argumentsWithPathsResolved(
+        _ arguments: Arguments,
+        relativeTo baseDirectory: URL
+    ) -> Arguments {
+        let base = baseDirectory.standardizedFileURL
+        let r = { resolveRelativePath($0, relativeTo: base) }
+        let symResolved: SymmetricPirArguments?
+        if let sym = arguments.symmetricPirArguments {
+            symResolved = SymmetricPirArguments(
+                databaseEncryptionKeyFilePath: sym.databaseEncryptionKeyFilePath.map { r($0) },
+                configType: sym.configType,
+                outputDatabaseEncryptionKeyFilePath: sym.outputDatabaseEncryptionKeyFilePath.map { r($0) })
+        } else {
+            symResolved = nil
+        }
+        return Arguments(
+            inputDatabase: r(arguments.inputDatabase),
+            outputDatabase: r(arguments.outputDatabase),
+            outputPirParameters: r(arguments.outputPirParameters),
+            rlweParameters: arguments.rlweParameters,
+            outputEvaluationKeyConfig: arguments.outputEvaluationKeyConfig.map { r($0) },
+            sharding: arguments.sharding,
+            shardingFunction: arguments.shardingFunction,
+            cuckooTableArguments: arguments.cuckooTableArguments,
+            algorithm: arguments.algorithm,
+            keyCompression: arguments.keyCompression,
+            useMaxSerializedBucketSize: arguments.useMaxSerializedBucketSize,
+            symmetricPirArguments: symResolved,
+            trialsPerShard: arguments.trialsPerShard)
+    }
+
     /// `outputDatabase` / `outputPirParameters`에서 마지막 경로 조각의 `...-SHARD_ID...` 접두를 `fileStem`에 맞춥니다.
     /// 예: `url-SHARD_ID.bin` + fileStem `fixed` → `fixed-SHARD_ID.bin`
+    ///
+    /// `URL(fileURLWithPath:)`는 상대 경로를 **현재 작업 디렉터리 기준 절대 경로**로 만들어,
+    /// 이후 `relativePathBaseDirectory` / `dataPath` 해석이 깨지므로 `NSString`만 사용한다.
     private static func rewriteShardPathForFileStem(_ path: String, fileStem: String) -> String {
         guard path.contains("SHARD_ID") else { return path }
-        let url = URL(fileURLWithPath: path)
-        let last = url.lastPathComponent
+        let nsPath = path as NSString
+        let last = nsPath.lastPathComponent
         guard let shardRange = last.range(of: "SHARD_ID") else { return path }
         let suffix = String(last[shardRange.lowerBound...])
         let newLast = "\(fileStem)-\(suffix)"
-        return url.deletingLastPathComponent().appendingPathComponent(newLast).path
+        let dir = nsPath.deletingLastPathComponent
+        if dir.isEmpty || dir == "." {
+            return newLast
+        }
+        return (dir as NSString).appendingPathComponent(newLast)
     }
 
     /// - Parameter outputFileStem: 지정 시 JSON의 출력 파일명 stem을 이 값으로 맞춥니다(예: `url-` → `{fileStem}-`).
-    static func run(configFilePath: String, outputFileStem: String? = nil, parallel: Bool = true) async throws {
+    /// - Parameter relativePathBaseDirectory: JSON 안의 상대 경로를 이 디렉터리 기준으로 절대 경로로 만든다.
+    ///   `nil`이면 설정 JSON 파일이 있는 디렉터리(`…/stem-config.json`의 부모)를 쓴다.
+    static func run(
+        configFilePath: String,
+        outputFileStem: String? = nil,
+        parallel: Bool = true,
+        relativePathBaseDirectory: String? = nil
+    ) async throws {
         do {
             let configURL = URL(fileURLWithPath: configFilePath)
             let configData = try Data(contentsOf: configURL)
@@ -265,6 +323,15 @@ enum InternalPIRProcessDatabase {
                     symmetricPirArguments: config.symmetricPirArguments,
                     trialsPerShard: config.trialsPerShard)
             }
+            let pathBase: URL
+            if let override = relativePathBaseDirectory?.trimmingCharacters(in: .whitespacesAndNewlines),
+               !override.isEmpty
+            {
+                pathBase = URL(fileURLWithPath: override, isDirectory: true).standardizedFileURL
+            } else {
+                pathBase = configURL.deletingLastPathComponent()
+            }
+            config = argumentsWithPathsResolved(config, relativeTo: pathBase)
             if config.rlweParameters.supportsScalar(UInt32.self) {
                 try await process(config: config, scheme: Bfv<UInt32>.self, parallel: parallel)
             } else {

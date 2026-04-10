@@ -59,9 +59,35 @@ struct ServerConfiguration: Codable {
         let tokens: [String]
     }
 
+    /// PIR params/bin, prefilter, `\(fileStem)-config.json` 등을 둘 루트 디렉터리.
+    /// - 절대 경로이면 그대로 사용.
+    /// - 상대 경로이면 **서비스 설정 JSON 파일이 있는 디렉터리**를 기준으로 한다.
+    /// - 생략하면 기존과 같이 process DB 설정만 `<서비스설정>/data/...`·prefilter·params는 각각 따로 본다.
+    let dataPath: String?
+
     let issuerRequestUri: String?
     let users: [UserGroup]
     let usecases: [Usecase]
+}
+
+extension ServerConfiguration {
+    /// `dataPath`가 비어 있으면 nil.
+    func resolvedDataRootURL(relativeTo serviceConfigURL: URL) -> URL? {
+        guard let raw = dataPath?.trimmingCharacters(in: .whitespacesAndNewlines), !raw.isEmpty else {
+            return nil
+        }
+        if (raw as NSString).isAbsolutePath {
+            return URL(fileURLWithPath: raw, isDirectory: true).standardizedFileURL
+        }
+        return serviceConfigURL.deletingLastPathComponent()
+            .appendingPathComponent(raw, isDirectory: true)
+            .standardizedFileURL
+    }
+
+    /// `dataPath` 미사용 시 process DB용 JSON이 위치하는 디렉터리 (`<서비스설정>/data`).
+    func defaultProcessConfigDataDirectoryURL(relativeTo serviceConfigURL: URL) -> URL {
+        serviceConfigURL.deletingLastPathComponent().appendingPathComponent("data", isDirectory: true)
+    }
 }
 
 actor ReloadService: Service {
@@ -133,21 +159,33 @@ actor ReloadService: Service {
                 try await usecaseStore.set(name: usecase.name, usecase: nil, versionCount: versionCount)
                 continue
             }
-            // If `\(usecase.fileStem)-0.params.txtpb` is missing, generate PIR DB inputs by running
-            // `InternalPIRProcessDatabase` with `\(usecase.fileStem)-config.json` located next to `service-config-file`.
-            let derivedProcessConfigPath = configFile
-                .deletingLastPathComponent()
-                .appendingPathComponent("data/\(usecase.fileStem)-config.json")
-                .path
+            let dataRoot = config.resolvedDataRootURL(relativeTo: configFile)
+            let derivedProcessConfigPath: String
+            let sourceFile: String
+            let outputFile: String
+            let pirDataDirectory: String?
+
+            if let root = dataRoot {
+                derivedProcessConfigPath = root.appendingPathComponent("\(usecase.fileStem)-config.json").path
+                sourceFile = root.appendingPathComponent("\(usecase.fileStem).txtpb").path
+                outputFile = root.appendingPathComponent("\(usecase.fileStem)-prefilter.json").path
+                pirDataDirectory = root.path
+            } else {
+                derivedProcessConfigPath = config
+                    .defaultProcessConfigDataDirectoryURL(relativeTo: configFile)
+                    .appendingPathComponent("\(usecase.fileStem)-config.json")
+                    .path
+                sourceFile = "\(usecase.fileStem).txtpb"
+                outputFile = "\(usecase.fileStem)-prefilter.json"
+                pirDataDirectory = nil
+            }
 
             let loaded = try await loadUsecase(
                 usecase: usecase,
                 processDatabaseConfigPath: derivedProcessConfigPath,
+                dataDirectory: pirDataDirectory,
                 logger: logger)
             try await usecaseStore.set(name: usecase.name, usecase: loaded, versionCount: versionCount)
-
-            let sourceFile = "\(usecase.fileStem).txtpb"
-            let outputFile = "\(usecase.fileStem)-prefilter.json"
 
             logger.info("Generating URL prefilter from \(sourceFile)")
             let urls = try loadPrefilterURLs(from: sourceFile)
