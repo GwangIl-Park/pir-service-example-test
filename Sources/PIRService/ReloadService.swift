@@ -17,7 +17,6 @@ import Foundation
 import Logging
 import PrivateInformationRetrieval
 import ServiceLifecycle
-import UnixSignals
 
 struct SymmetricPirArguments: Codable, Hashable {
     /// Error encountered on resolving SymmetricPirArguments.
@@ -112,24 +111,15 @@ actor ReloadService: Service {
     }
 
     func run() async throws {
-        let signalSequence = await UnixSignalsSequence(trapping: .sighup)
-        for await signal in signalSequence {
-            guard signal == .sighup else {
-                continue
-            }
-
-            logger.info("Reloading configuration...")
-            do {
-                try await reloadConfiguration()
-                logger.info("Reloading configuration completed.")
-            } catch {
-                logger.error("Failed to reload configuration: \(error.localizedDescription).")
-                logger.error("Service state might have been partially updated.")
-            }
+        // 설정 리로드는 TCP `RELOAD` / HTTP `POST /reload-database` 등에서
+        // `reloadConfiguration()` 직접 호출로만 수행한다 (SIGHUP 미사용 — logrotate 등이 시그널을 보내도 무시).
+        while true {
+            try await Task.sleep(for: .seconds(86_400))
         }
     }
 
     func reloadConfiguration() async throws {
+        logger.info("Reloading configuration...")
         let configData = try Data(contentsOf: configFile)
         let config = try JSONDecoder().decode(ServerConfiguration.self, from: configData)
 
@@ -220,6 +210,7 @@ actor ReloadService: Service {
         }
 
         await prefilterStore.setAll(prefilterSnapshots)
+        logger.info("Reloading configuration completed.")
     }
 
     private func loadPrefilterURLs(from filePath: String) throws -> [String] {

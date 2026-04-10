@@ -62,7 +62,6 @@ let package = Package(
                 .product(name: "HummingbirdCompression", package: "hummingbird-compression"),
                 .product(name: "PrivateInformationRetrievalProtobuf", package: "swift-homomorphic-encryption"),
                 .product(name: "ServiceLifecycle", package: "swift-service-lifecycle"),
-                .product(name: "UnixSignals", package: "swift-service-lifecycle"),
             ],
             swiftSettings: swiftSettings),
         .executableTarget(

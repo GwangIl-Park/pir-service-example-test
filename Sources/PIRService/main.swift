@@ -17,6 +17,11 @@ import Foundation
 import Hummingbird
 import ServiceLifecycle
 
+/// `buildApplication` 시점에는 `ReloadService`가 아직 없어서, 나중에 주입해 `performReload` 클로저가 호출되게 한다.
+private final class ReloadServiceHolder: @unchecked Sendable {
+    var reloadService: ReloadService!
+}
+
 // This executable is used in tests, which breaks `swift test -c release` when used with `@main`.
 // So we avoid using `@main` here.
 struct ServerCommand: AsyncParsableCommand {
@@ -46,11 +51,13 @@ struct ServerCommand: AsyncParsableCommand {
         let prefilterStore = PrefilterStore()
         let privacyPassState = try PrivacyPassState(userAuthenticator: UserAuthenticator())
 
+        let reloadHolder = ReloadServiceHolder()
         let app = try await buildApplication(
             configuration: .init(address: .hostname(hostname, port: httpPort)),
             usecaseStore: usecaseStore,
             prefilterStore: prefilterStore,
-            privacyPassState: privacyPassState)
+            privacyPassState: privacyPassState,
+            performReloadConfiguration: { try await reloadHolder.reloadService.reloadConfiguration() })
 
         let reloadService = ReloadService(
             configFile: URL(fileURLWithPath: serviceConfigFile),
@@ -58,15 +65,14 @@ struct ServerCommand: AsyncParsableCommand {
             prefilterStore: prefilterStore,
             privacyPassState: privacyPassState,
             logger: app.logger)
+        reloadHolder.reloadService = reloadService
 
         let tcpService = PIRProcessDatabaseTCPService(
             host: hostname,
             port: tcpPort,
             configFile: URL(fileURLWithPath: serviceConfigFile),
             logger: app.logger,
-            performReloadConfiguration: {
-                try await reloadService.reloadConfiguration()
-            })
+            performReloadConfiguration: { try await reloadHolder.reloadService.reloadConfiguration() })
 
         try await reloadService.reloadConfiguration()
 

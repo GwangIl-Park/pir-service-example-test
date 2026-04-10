@@ -1,12 +1,14 @@
 import Foundation
 import Hummingbird
-#if canImport(Darwin)
-import Darwin
-#elseif canImport(Glibc)
-import Glibc
-#endif
 
 struct PIRProcessDatabaseController {
+    /// `POST /reload-database` 시 `ReloadService.reloadConfiguration()`에 연결. 테스트에서는 nil.
+    private let performReloadConfiguration: (@Sendable () async throws -> Void)?
+
+    init(performReloadConfiguration: (@Sendable () async throws -> Void)? = nil) {
+        self.performReloadConfiguration = performReloadConfiguration
+    }
+
     /// 기본 설정 파일 경로 (요청 바디가 없을 때 사용). 환경변수 `PIR_PROCESS_DATABASE_CONFIG` 또는 data/url-config.json
     private static var defaultConfigPath: String {
         ProcessInfo.processInfo.environment["PIR_PROCESS_DATABASE_CONFIG"]
@@ -39,30 +41,21 @@ struct PIRProcessDatabaseController {
 
     @Sendable
     func reloadDatabase(_ request: Request, context _: AppContext) async throws -> HTTPResponse.Status {
-        _ = request // 현재는 요청 바디를 사용하지 않음
-
-        // 현재 프로세스를 종료하지 않고, SIGHUP 시그널만 발생시켜
-        // 이미 등록된 ReloadService가 설정/데이터를 다시 로드하도록 합니다.
-        let result = raise(SIGHUP)
-        if result != 0 {
-            let code = Int(errno)
-            throw ProcessDatabaseError.nonZeroExit(code)
+        _ = request
+        guard let performReloadConfiguration else {
+            throw HTTPError(.serviceUnavailable, message: "reload-database is not configured (tests / missing wiring)")
         }
-
-        // ReloadService가 비동기로 새 데이터를 로드하는 동안
-        // UsecaseStore는 버전별로 유지되므로, 완료 전까지는 기존 데이터가 사용됩니다.
+        try await performReloadConfiguration()
         return .accepted
     }
 }
 
 enum ProcessDatabaseError: Error, HTTPResponseError {
     case executableNotFound(String)
-    case nonZeroExit(Int)
 
     var status: HTTPResponse.Status {
         switch self {
         case .executableNotFound: return .internalServerError
-        case .nonZeroExit: return .internalServerError
         }
     }
 
@@ -71,8 +64,6 @@ enum ProcessDatabaseError: Error, HTTPResponseError {
         switch self {
         case let .executableNotFound(path):
             message = "PIRProcessDatabase executable not found: \(path)"
-        case let .nonZeroExit(code):
-            message = "PIRProcessDatabase exited with code \(code)"
         }
         return Response(status: status, body: ResponseBody(byteBuffer: ByteBuffer(string: message)))
     }

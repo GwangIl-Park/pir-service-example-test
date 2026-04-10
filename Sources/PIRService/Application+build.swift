@@ -100,7 +100,9 @@ func buildApplication(
     usecaseStore: UsecaseStore = UsecaseStore(),
     prefilterStore: PrefilterStore = PrefilterStore(),
     privacyPassState: PrivacyPassState<UserAuthenticator>? = nil,
-    evaluationKeyStore: some PersistDriver = MemoryPersistDriver()) async throws -> some ApplicationProtocol
+    evaluationKeyStore: some PersistDriver = MemoryPersistDriver(),
+    performReloadConfiguration: (@Sendable () async throws -> Void)? = nil
+) async throws -> some ApplicationProtocol
 {
     let router = Router(context: AppContext.self)
     router.middlewares.add(LogRequestsMiddleware(.info, includeHeaders: .none))
@@ -118,7 +120,8 @@ func buildApplication(
 
     pirServiceController.addRoutes(to: pirGroup)
 
-    let processDatabaseController = PIRProcessDatabaseController()
+    let processDatabaseController = PIRProcessDatabaseController(
+        performReloadConfiguration: performReloadConfiguration)
     processDatabaseController.addRoutes(to: router.group())
     let prefilterController = PrefilterController(store: prefilterStore)
     prefilterController.addRoutes(to: router.group())

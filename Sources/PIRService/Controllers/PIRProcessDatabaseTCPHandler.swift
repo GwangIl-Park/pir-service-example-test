@@ -8,7 +8,7 @@ import NIO
 ///
 /// - 텍스트 프로토콜:
 ///   - `PROCESS`: 미리 지정된 설정 파일로 DB 처리
-///   - `RELOAD`: `ReloadService.reloadConfiguration()` 직접 호출 (Linux에서 `raise(SIGHUP)`가 시그널 스트림에 잡히지 않는 경우가 있음)
+///   - `RELOAD`: `ReloadService.reloadConfiguration()` 직접 호출
 ///   - 성공 시: `"OK\n"`, 실패 시: `"ERROR: ...\n"`
 final class PIRProcessDatabaseTCPHandler: ChannelInboundHandler, @unchecked Sendable {
     typealias InboundIn = ByteBuffer
