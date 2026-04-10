@@ -38,13 +38,23 @@ struct ServerCommand: AsyncParsableCommand {
         기본: logs/pir-service.log. '-' 를 주면 stderr만 씁니다.
         """)
     var logFile: String = "logs/pir-service.log"
+    @Option(
+        name: .customLong("log-max-bytes"))
+    var logMaxBytes: Int = 1073741824
+    @Option(
+        name: .customLong("log-max-archives"),
+        help: "회전 시 보관할 이전 파일 개수 (app.log.1 … app.log.N).")
+    var logMaxArchives: Int = 99
     @Option(name: .customLong("service-config-file")) var serviceConfigFile: String
 
     func run() async throws {
         if logFile == "-" {
             LoggingBootstrap.bootstrapStderrOnly()
         } else {
-            try LoggingBootstrap.bootstrapStderrAndFile(logFileURL: URL(fileURLWithPath: logFile))
+            try LoggingBootstrap.bootstrapStderrAndFile(
+                logFileURL: URL(fileURLWithPath: logFile),
+                maxBytesPerFile: logMaxBytes > 0 ? logMaxBytes : nil,
+                maxRotatedFiles: logMaxArchives)
         }
 
         let usecaseStore = UsecaseStore()
