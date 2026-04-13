@@ -15,6 +15,13 @@
 import Foundation
 import Logging
 
+#if os(Windows)
+#elseif canImport(Darwin)
+import Darwin
+#elseif canImport(Glibc)
+import Glibc
+#endif
+
 /// Thread-safe append-only sink. 선택 시 **크기 기준**으로 `path`, `path.1` … `path.N` 형태로 자체 회전한다.
 final class FileLogSink: @unchecked Sendable {
     private let lock = NSLock()
@@ -109,14 +116,24 @@ enum FileLogSinkError: Error {
 /// Writes swift-log output to a file (same format family as ``StreamLogHandler``).
 struct FileLogHandler: LogHandler {
     var logLevel: Logger.Level = .info
-    var metadata = Logger.Metadata()
+
+    var metadataProvider: Logger.MetadataProvider?
+
+    private var prettyMetadata: String?
+    var metadata = Logger.Metadata() {
+        didSet {
+            self.prettyMetadata = Self.prettify(self.metadata)
+        }
+    }
 
     private let label: String
     private let sink: FileLogSink
 
-    init(label: String, sink: FileLogSink) {
+    init(label: String, sink: FileLogSink, metadataProvider: Logger.MetadataProvider? = nil) {
         self.label = label
         self.sink = sink
+        self.metadataProvider = metadataProvider ?? LoggingSystem.metadataProvider
+        self.prettyMetadata = Self.prettify(self.metadata)
     }
 
     subscript(metadataKey metadataKey: Logger.Metadata.Key) -> Logger.Metadata.Value? {
@@ -133,14 +150,79 @@ struct FileLogHandler: LogHandler {
         function: String,
         line: UInt
     ) {
-        let line = "\(Self.timestamp()) \(level) \(label): [\(source)] \(message)\n"
+        let effectiveMetadata = Self.prepareMetadata(
+            base: self.metadata,
+            provider: self.metadataProvider,
+            explicit: explicitMetadata
+        )
+
+        let prettyLine: String?
+        if let effectiveMetadata {
+            prettyLine = Self.prettify(effectiveMetadata)
+        } else {
+            prettyLine = self.prettyMetadata
+        }
+
+        let line =
+            "\(Self.timestamp()) \(level)\(self.label.isEmpty ? "" : " ")\(self.label):\(prettyLine.map { " \($0)" } ?? "") [\(source)] \(message)\n"
         sink.writeLine(line)
     }
 
+    /// ``StreamLogHandler`` 와 동일한 규칙 (swift-log `StreamLogHandler.prepareMetadata` 와 대응).
+    private static func prepareMetadata(
+        base: Logger.Metadata,
+        provider: Logger.MetadataProvider?,
+        explicit: Logger.Metadata?
+    ) -> Logger.Metadata? {
+        var metadata = base
+
+        let provided = provider?.get() ?? [:]
+
+        guard !provided.isEmpty || !((explicit ?? [:]).isEmpty) else {
+            return nil
+        }
+
+        if !provided.isEmpty {
+            metadata.merge(provided, uniquingKeysWith: { _, provided in provided })
+        }
+
+        if let explicit, !explicit.isEmpty {
+            metadata.merge(explicit, uniquingKeysWith: { _, explicit in explicit })
+        }
+
+        return metadata
+    }
+
+    private static func prettify(_ metadata: Logger.Metadata) -> String? {
+        if metadata.isEmpty {
+            return nil
+        }
+        return metadata.lazy.sorted(by: { $0.key < $1.key }).map { "\($0)=\($1)" }.joined(separator: " ")
+    }
+
+    /// ``StreamLogHandler`` 의 타임스탬프와 동일 (`%Y-%m-%dT%H:%M:%S%z`, 로컬 타임존).
     private static func timestamp() -> String {
-        let formatter = ISO8601DateFormatter()
-        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        return formatter.string(from: Date())
+        var buffer = [Int8](repeating: 0, count: 255)
+        #if os(Windows)
+        var timestamp = __time64_t()
+        _ = _time64(&timestamp)
+
+        var localTime = tm()
+        _ = _localtime64_s(&localTime, &timestamp)
+
+        _ = strftime(&buffer, buffer.count, "%Y-%m-%dT%H:%M:%S%z", &localTime)
+        #else
+        var timestamp = time(nil)
+        guard let localTime = localtime(&timestamp) else {
+            return " "
+        }
+        strftime(&buffer, buffer.count, "%Y-%m-%dT%H:%M:%S%z", localTime)
+        #endif
+        return buffer.withUnsafeBufferPointer {
+            $0.withMemoryRebound(to: CChar.self) {
+                String(cString: $0.baseAddress!)
+            }
+        }
     }
 }
 
