@@ -349,57 +349,63 @@ enum InternalPIRProcessDatabase {
     /// `process`가 출력을 쓰기 전에 기존 산출물을 지운다. 샤드 수가 줄었을 때 남는 오래된 샤드 파일도 제거한다.
     private static func removeStaleOutputsBeforeProcessing(config: Arguments) throws {
         let fm = FileManager.default
+        var removedShardIDs = Set<String>()
 
-        func removeIfExists(_ path: String) throws {
+        func removeIfExists(_ path: String) throws -> Bool {
             var isDir: ObjCBool = false
-            guard fm.fileExists(atPath: path, isDirectory: &isDir) else { return }
-            guard !isDir.boolValue else {
-                logger.warning("Skipped removing output path because it is a directory: \(path)")
-                return
-            }
+            guard fm.fileExists(atPath: path, isDirectory: &isDir) else { return false }
+            guard !isDir.boolValue else { return false }
             try fm.removeItem(atPath: path)
-            logger.info("Removed stale output: \(path)")
+            return true
         }
 
         if !config.outputDatabase.contains("SHARD_ID") {
-            try removeIfExists(config.outputDatabase)
-            try removeIfExists(config.outputPirParameters)
+            let removedDb = try removeIfExists(config.outputDatabase)
+            let removedParams = try removeIfExists(config.outputPirParameters)
             if let path = config.outputEvaluationKeyConfig {
-                try removeIfExists(path)
+                _ = try removeIfExists(path)
             }
+            let shardCount = (removedDb || removedParams) ? 1 : 0
+            logger.info("Removed stale PIR outputs for \(shardCount) shard(s) before processing")
             return
         }
 
-        try removeShardPatternFiles(templatePath: config.outputDatabase, fileManager: fm)
-        try removeShardPatternFiles(templatePath: config.outputPirParameters, fileManager: fm)
+        removedShardIDs.formUnion(try removeShardPatternFiles(templatePath: config.outputDatabase, fileManager: fm))
+        removedShardIDs.formUnion(try removeShardPatternFiles(templatePath: config.outputPirParameters, fileManager: fm))
         if let path = config.outputEvaluationKeyConfig {
-            try removeIfExists(path)
+            _ = try removeIfExists(path)
         }
+
+        logger.info("Removed stale PIR outputs for \(removedShardIDs.count) shard(s) before processing")
     }
 
-    /// `…/stem-SHARD_ID.suffix` 형태일 때 같은 디렉터리의 `stem-*` + 동일 접미 파일을 모두 삭제한다.
-    private static func removeShardPatternFiles(templatePath: String, fileManager: FileManager) throws {
+    /// `…/stem-SHARD_ID.suffix` 형태일 때 같은 디렉터리의 `stem-*` + 동일 접미 파일을 모두 삭제한다. 삭제한 파일의 샤드 ID 집합을 반환한다.
+    private static func removeShardPatternFiles(templatePath: String, fileManager: FileManager) throws -> Set<String> {
         let ns = templatePath as NSString
         let last = ns.lastPathComponent
-        guard let range = last.range(of: "SHARD_ID") else { return }
+        guard let range = last.range(of: "SHARD_ID") else { return [] }
         let prefix = String(last[..<range.lowerBound])
         let suffix = String(last[range.upperBound...])
         guard !prefix.isEmpty else {
             logger.warning("Skipping shard output cleanup: empty prefix before SHARD_ID in \(templatePath)")
-            return
+            return []
         }
         let parent = ns.deletingLastPathComponent
-        guard fileManager.fileExists(atPath: parent) else { return }
+        guard fileManager.fileExists(atPath: parent) else { return [] }
         let names = try fileManager.contentsOfDirectory(atPath: parent)
+        var shardIDs = Set<String>()
         for name in names where name.hasPrefix(prefix) && name.hasSuffix(suffix)
             && name.count > prefix.count + suffix.count
         {
             let full = (parent as NSString).appendingPathComponent(name)
             var isDir: ObjCBool = false
             guard fileManager.fileExists(atPath: full, isDirectory: &isDir), !isDir.boolValue else { continue }
+            let shardID = String(name.dropFirst(prefix.count).dropLast(suffix.count))
+            guard !shardID.isEmpty else { continue }
             try fileManager.removeItem(atPath: full)
-            logger.info("Removed stale shard output: \(full)")
+            shardIDs.insert(shardID)
         }
+        return shardIDs
     }
 
     private static func process<Scheme: HeScheme>(
