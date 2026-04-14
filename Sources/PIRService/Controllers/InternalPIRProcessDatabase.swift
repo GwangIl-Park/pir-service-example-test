@@ -346,11 +346,68 @@ enum InternalPIRProcessDatabase {
         }
     }
 
+    /// `process`가 출력을 쓰기 전에 기존 산출물을 지운다. 샤드 수가 줄었을 때 남는 오래된 샤드 파일도 제거한다.
+    private static func removeStaleOutputsBeforeProcessing(config: Arguments) throws {
+        let fm = FileManager.default
+
+        func removeIfExists(_ path: String) throws {
+            var isDir: ObjCBool = false
+            guard fm.fileExists(atPath: path, isDirectory: &isDir) else { return }
+            guard !isDir.boolValue else {
+                logger.warning("Skipped removing output path because it is a directory: \(path)")
+                return
+            }
+            try fm.removeItem(atPath: path)
+            logger.info("Removed stale output: \(path)")
+        }
+
+        if !config.outputDatabase.contains("SHARD_ID") {
+            try removeIfExists(config.outputDatabase)
+            try removeIfExists(config.outputPirParameters)
+            if let path = config.outputEvaluationKeyConfig {
+                try removeIfExists(path)
+            }
+            return
+        }
+
+        try removeShardPatternFiles(templatePath: config.outputDatabase, fileManager: fm)
+        try removeShardPatternFiles(templatePath: config.outputPirParameters, fileManager: fm)
+        if let path = config.outputEvaluationKeyConfig {
+            try removeIfExists(path)
+        }
+    }
+
+    /// `…/stem-SHARD_ID.suffix` 형태일 때 같은 디렉터리의 `stem-*` + 동일 접미 파일을 모두 삭제한다.
+    private static func removeShardPatternFiles(templatePath: String, fileManager: FileManager) throws {
+        let ns = templatePath as NSString
+        let last = ns.lastPathComponent
+        guard let range = last.range(of: "SHARD_ID") else { return }
+        let prefix = String(last[..<range.lowerBound])
+        let suffix = String(last[range.upperBound...])
+        guard !prefix.isEmpty else {
+            logger.warning("Skipping shard output cleanup: empty prefix before SHARD_ID in \(templatePath)")
+            return
+        }
+        let parent = ns.deletingLastPathComponent
+        guard fileManager.fileExists(atPath: parent) else { return }
+        let names = try fileManager.contentsOfDirectory(atPath: parent)
+        for name in names where name.hasPrefix(prefix) && name.hasSuffix(suffix)
+            && name.count > prefix.count + suffix.count
+        {
+            let full = (parent as NSString).appendingPathComponent(name)
+            var isDir: ObjCBool = false
+            guard fileManager.fileExists(atPath: full, isDirectory: &isDir), !isDir.boolValue else { continue }
+            try fileManager.removeItem(atPath: full)
+            logger.info("Removed stale shard output: \(full)")
+        }
+    }
+
     private static func process<Scheme: HeScheme>(
         config: Arguments,
         scheme: Scheme.Type,
         parallel: Bool) async throws
     {
+        try removeStaleOutputsBeforeProcessing(config: config)
         let database: [KeywordValuePair] =
             try Apple_SwiftHomomorphicEncryption_Pir_V1_KeywordDatabase(from: config.inputDatabase).native()
 

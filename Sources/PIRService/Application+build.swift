@@ -21,14 +21,14 @@ import NIO
 import PrivateInformationRetrieval
 import Util
 
-/// `PirUsecase` 로드 시 베이스 params 파일이 없고, DB 생성용 JSON 경로도 없을 때 발생합니다.
+/// `processDatabaseConfigPath` 없이 PIR params가 디스크에 없을 때 발생합니다.
 enum PirUsecaseLoadError: Error, LocalizedError {
     case missingParametersFile(String)
 
     var errorDescription: String? {
         switch self {
         case .missingParametersFile(let path):
-            "PIR parameters file not found at \(path). If needed, generate PIR inputs by running InternalPIRProcessDatabase with `<usecase.fileStem>-config.json` next to service-config-file."
+            "PIR parameters file not found at \(path). Provide `processDatabaseConfigPath` (e.g. `<usecase.fileStem>-config.json`) to generate outputs, or run InternalPIRProcessDatabase manually."
         }
     }
 }
@@ -53,30 +53,19 @@ struct AppContext: IdentifiedRequestContext, AuthenticatedRequestContext, Platfo
 }
 
 /// - Parameters:
-///   - processDatabaseConfigPath: `InternalPIRProcessDatabase`용 JSON 경로. 베이스
-///     `\(fileStem)-0.params.txtpb`가 없을 때 한 번 `InternalPIRProcessDatabase.run`을 호출합니다.
+///   - processDatabaseConfigPath: `InternalPIRProcessDatabase`용 JSON 경로. 지정되면
+///     기존 params 유무와 관계없이 항상 `InternalPIRProcessDatabase.run`을 호출합니다.
 func loadUsecase(
     usecase: ServerConfiguration.Usecase,
     processDatabaseConfigPath: String?,
     dataDirectory: String? = nil,
     logger: Logger? = nil
 ) async throws -> Usecase {
-    let baseParamsPath: String
-    if let dir = dataDirectory {
-        baseParamsPath = URL(fileURLWithPath: dir, isDirectory: true)
-            .appendingPathComponent("\(usecase.fileStem)-0.params.txtpb").path
-    } else {
-        baseParamsPath = "\(usecase.fileStem)-0.params.txtpb"
-    }
-    if !FileManager.default.fileExists(atPath: baseParamsPath) {
-        guard let processDatabaseConfigPath else {
-            throw PirUsecaseLoadError.missingParametersFile(baseParamsPath)
-        }
+    if let processDatabaseConfigPath {
         let log = logger ?? Logger(label: "PIRService.loadUsecase")
-        log.info(
-            "Missing PIR parameters at \(baseParamsPath); running InternalPIRProcessDatabase with \(processDatabaseConfigPath)")
+        log.info("Running InternalPIRProcessDatabase with \(processDatabaseConfigPath)")
         let pathResolutionBase: String
-        if let dir = dataDirectory {
+        if let dir = dataDirectory, !dir.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             pathResolutionBase = URL(fileURLWithPath: dir, isDirectory: true).standardizedFileURL.path
         } else {
             pathResolutionBase = URL(fileURLWithPath: processDatabaseConfigPath).deletingLastPathComponent()
@@ -87,6 +76,17 @@ func loadUsecase(
             outputFileStem: usecase.fileStem,
             parallel: true,
             relativePathBaseDirectory: pathResolutionBase)
+    } else {
+        let baseParamsPath: String
+        if let dir = dataDirectory, !dir.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            baseParamsPath = URL(fileURLWithPath: dir, isDirectory: true)
+                .appendingPathComponent("\(usecase.fileStem)-0.params.txtpb").path
+        } else {
+            baseParamsPath = "\(usecase.fileStem)-0.params.txtpb"
+        }
+        guard FileManager.default.fileExists(atPath: baseParamsPath) else {
+            throw PirUsecaseLoadError.missingParametersFile(baseParamsPath)
+        }
     }
     do {
         return try PirUsecase<MulPirServer<Bfv<UInt32>>>(usecase: usecase, dataDirectory: dataDirectory)

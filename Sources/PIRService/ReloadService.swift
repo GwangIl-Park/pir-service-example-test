@@ -48,7 +48,6 @@ struct ServerConfiguration: Codable {
     struct Usecase: Codable {
         let name: String
         let fileStem: String
-        let shardCount: Int
         let versionCount: Int?
         let symmetricPirArguments: SymmetricPirArguments?
     }
