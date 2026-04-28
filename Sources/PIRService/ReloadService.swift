@@ -176,39 +176,40 @@ actor ReloadService: Service {
                 logger: logger)
             try await usecaseStore.set(name: usecase.name, usecase: loaded, versionCount: versionCount)
 
-            logger.info("Generating URL prefilter from \(sourceFile)")
-            let urls = try loadPrefilterURLs(from: sourceFile)
-            if !urls.isEmpty {
-                let filter = BloomFilter(items: urls)
-                let generatedAt = Date()
-                let version = try nextPrefilterVersion(
-                    in: URL(fileURLWithPath: outputFile).deletingLastPathComponent(),
-                    generatedAt: generatedAt)
-                let metadata = try savePrefilter(
-                    filter: filter,
-                    to: outputFile,
-                    version: version,
-                    generatedAt: generatedAt)
-                prefilterSnapshots[usecase.name] = .init(
-                    usecase: usecase.name,
-                    generatedAt: generatedAt,
-                    sourceURLCount: urls.count,
-                    sourceFile: sourceFile,
-                    outputFile: outputFile,
-                    version: metadata.version,
-                    size: metadata.size,
-                    sha256: metadata.sha256)
-                let datName = (outputFile as NSString).deletingPathExtension + ".dat"
-                logger.info("""
-                    Generated URL prefilters with \(urls.count) URLs from \(sourceFile), \
-                    saved Bloom metadata to \(outputFile), filter bytes to \(datName), version \(version)
-                    """)
-            } else {
-                logger.warning("Skipped Bloom filter generation because no URLs were found in \(sourceFile)")
-            }
+        //     logger.info("Generating URL prefilter from \(sourceFile)")
+        //     let urls = try loadPrefilterURLs(from: sourceFile)
+        //     if !urls.isEmpty {
+        //         let filter = BloomFilter(items: urls)
+        //         let generatedAt = Date()
+        //         let version = try nextPrefilterVersion(
+        //             in: URL(fileURLWithPath: outputFile).deletingLastPathComponent(),
+        //             generatedAt: generatedAt)
+        //         let metadata = try savePrefilter(
+        //             filter: filter,
+        //             to: outputFile,
+        //             version: version,
+        //             generatedAt: generatedAt)
+        //         prefilterSnapshots[usecase.name] = .init(
+        //             usecase: usecase.name,
+        //             generatedAt: generatedAt,
+        //             sourceURLCount: urls.count,
+        //             sourceFile: sourceFile,
+        //             outputFile: outputFile,
+        //             version: metadata.version,
+        //             size: metadata.size,
+        //             sha256: metadata.sha256)
+        //         let datName = (outputFile as NSString).deletingPathExtension + ".dat"
+        //         logger.info("""
+        //             Generated URL prefilters with \(urls.count) URLs from \(sourceFile), \
+        //             saved Bloom metadata to \(outputFile), filter bytes to \(datName), version \(version)
+        //             """)
+        //     } else {
+        //         logger.warning("Skipped Bloom filter generation because no URLs were found in \(sourceFile)")
+        //     }
+        // }
         }
 
-        await prefilterStore.setAll(prefilterSnapshots)
+        // await prefilterStore.setAll(prefilterSnapshots)
         logger.info("Reloading configuration completed.")
     }
 
